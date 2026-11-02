@@ -1,0 +1,7 @@
+<!-- Listen mark: a play button drawn as equalizer bars (music + play), inside a thin ring. Symmetric about the horizontal axis. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:pathData="M27,54 A27,27 0 1 0 81,54 A27,27 0 1 0 27,54 Z" android:fillColor="#00000000" android:strokeColor="#66A78BFA" android:strokeWidth="1.5" />
+    <path android:pathData="M40.5,36 A3.5,3.5 0 0 1 44,39.5 V68.5 A3.5,3.5 0 0 1 37,68.5 V39.5 A3.5,3.5 0 0 1 40.5,36 Z M51,41 A3.5,3.5 0 0 1 54.5,44.5 V63.5 A3.5,3.5 0 0 1 47.5,63.5 V44.5 A3.5,3.5 0 0 1 51,41 Z M61.5,46 A3.5,3.5 0 0 1 65,49.5 V58.5 A3.5,3.5 0 0 1 58,58.5 V49.5 A3.5,3.5 0 0 1 61.5,46 Z M71.5,51 A3,3 0 1 1 71.5,57 A3,3 0 1 1 71.5,51 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="0" android:startY="34" android:endX="0" android:endY="74"><item android:offset="0" android:color="#FFFFFFFF" /><item android:offset="1" android:color="#FFD8C4FF" /></gradient></aapt:attr></path>
+</vector>
