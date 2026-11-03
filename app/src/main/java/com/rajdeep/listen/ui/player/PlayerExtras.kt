@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.automirrored.rounded.TextSnippet
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Delete
@@ -98,7 +99,7 @@ fun LyricsPane(vm: AppViewModel, np: NowPlaying) {
     Box(Modifier.fillMaxSize().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
         when (val l = lyrics) {
             null -> Text("Finding lyrics…", style = MaterialTheme.typography.titleMedium, color = Palette.TextDim)
-            Lyrics.None -> EmptyState(Icons.Rounded.TextSnippet, "No lyrics found", "LRCLIB has no lyrics for this track yet.")
+            Lyrics.None -> EmptyState(Icons.AutoMirrored.Rounded.TextSnippet, "No lyrics found", "No lyrics available for this track yet.")
             Lyrics.Offline -> EmptyState(Icons.Rounded.CloudOff, "You're offline", "Lyrics are fetched once, then work offline.")
             is Lyrics.Plain -> Text(
                 l.text, style = MaterialTheme.typography.titleLarge, color = Palette.Text.copy(alpha = 0.9f),

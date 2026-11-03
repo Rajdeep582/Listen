@@ -6,9 +6,12 @@ import com.rajdeep.listen.data.db.LibraryDao
 import com.rajdeep.listen.data.db.Song
 import com.rajdeep.listen.data.online.AiClient
 import com.rajdeep.listen.data.online.Audius
+import com.rajdeep.listen.data.online.FreeToUse
 import com.rajdeep.listen.data.online.Http
 import com.rajdeep.listen.data.online.ITunes
+import com.rajdeep.listen.data.online.Incompetech
 import com.rajdeep.listen.data.online.Jamendo
+import com.rajdeep.listen.data.online.JioSaavn
 import com.rajdeep.listen.data.online.OnlineTrack
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -41,7 +44,7 @@ class Recommender(private val context: Context, private val dao: LibraryDao) {
         val taste = dao.tasteSongs(15)
         // AI DISABLED (owner request) — to re-enable AI picks, replace the next line with:
         // val out = ai(artists, taste) ?: fallback(artists)
-        val out = fallback(artists)
+        val out = recco(taste, artists) ?: fallback(artists)
         save(out)
         return out
     }
@@ -73,9 +76,27 @@ class Recommender(private val context: Context, private val dao: LibraryDao) {
         val q = "$title $artist"
         dao.searchSongs(title).firstOrNull { SearchEngine.score(q, listOf(it.title to 4, it.artist to 3)) > 0 && it.artist.contains(artist.substringBefore(' '), true) }
             ?.let { return Suggestion.Local(it, "In your library") }
-        val full = runCatching { Audius.search(q) }.getOrDefault(emptyList()) + runCatching { Jamendo.search(q) }.getOrDefault(emptyList())
+        val saavn = runCatching { JioSaavn.search(q) }.getOrDefault(emptyList())
+        saavn.firstOrNull { SearchEngine.score(title, listOf(it.title to 1)) > 0 }?.let { return Suggestion.Online(it, reason) }
+        val full = runCatching { Audius.search(q) }.getOrDefault(emptyList()) +
+                   runCatching { FreeToUse.search(q) }.getOrDefault(emptyList()) +
+                   runCatching { Incompetech.search(q) }.getOrDefault(emptyList()) +
+                   runCatching { Jamendo.search(q) }.getOrDefault(emptyList())
         full.firstOrNull { SearchEngine.score(title, listOf(it.title to 1)) > 0 }?.let { return Suggestion.Online(it, reason) }
         return runCatching { ITunes.search(q) }.getOrDefault(emptyList()).firstOrNull()?.let { Suggestion.Online(it, reason) }
+    }
+
+    /** ReccoBeats: seeds = your recent/favourite songs → similar tracks → resolved to playable. */
+    private suspend fun recco(taste: List<Song>, artists: List<String>): List<Suggestion>? = coroutineScope {
+        if (taste.isEmpty()) return@coroutineScope null
+        val seeds = taste.take(8).map { s -> async { runCatching { com.rajdeep.listen.data.online.ReccoBeats.seedFor(s.title, s.artist) }.getOrNull() } }
+            .awaitAll().filterNotNull().distinct().take(5)
+        val pairs = runCatching { com.rajdeep.listen.data.online.ReccoBeats.recommend(seeds, 30) }.getOrDefault(emptyList())
+        if (pairs.isEmpty()) return@coroutineScope null
+        val gate = Semaphore(4)
+        val because = artists.firstOrNull()?.let { "Because you play $it" } ?: "Similar to your favourites"
+        pairs.take(24).map { (t, a) -> async { gate.withPermit { resolve(t, a, because) } } }.awaitAll()
+            .filterNotNull().distinctBy { it.key() }.takeIf { it.size >= 4 }
     }
 
     /** No AI: Deezer "artist radio" (similar-artist mix, 30 s previews) for top artists. */

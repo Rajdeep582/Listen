@@ -138,7 +138,7 @@ fun SettingsScreen(vm: AppViewModel, activity: MainActivity) {
         }
 
         Group("Music playback") {
-            ToggleRow("Online sources (Audius, Jamendo, radio, lyrics)", s.onlineEnabled) { v -> vm.updateSettings { it.copy(onlineEnabled = v) } }
+            ToggleRow("Online sources (JioSaavn, FreeToUse, Incompetech, Audius, Jamendo, radio, lyrics)", s.onlineEnabled) { v -> vm.updateSettings { it.copy(onlineEnabled = v) } }
             ToggleRow("Skip silence between and inside tracks", s.skipSilence) { v -> vm.updateSettings { it.copy(skipSilence = v) } }
             ToggleRow("Equalizer", s.eqEnabled) { v -> vm.updateSettings { it.copy(eqEnabled = v) } }
             androidx.compose.animation.AnimatedVisibility(s.eqEnabled) {
@@ -248,7 +248,7 @@ fun SettingsScreen(vm: AppViewModel, activity: MainActivity) {
                 Spacer(Modifier.height(16.dp))
                 Text("BUILT WITH", style = MaterialTheme.typography.labelSmall, color = Palette.TextFaint)
                 Text(
-                    "Kotlin · Jetpack Compose · Media3 ExoPlayer · libVLC · Room · Coil\nLyrics: LRCLIB · Online music: Audius, Deezer",
+                    "Kotlin · Jetpack Compose · Media3 ExoPlayer · libVLC · Room · Coil\nMusic & Lyrics: JioSaavn, FreeToUse, Incompetech, Audius, Jamendo, Deezer, iTunes, ccMixter, Internet Archive, RadioBrowser, LRCLIB, Lyrics.ovh",
                     style = MaterialTheme.typography.bodySmall, color = Palette.TextDim,
                 )
                 Spacer(Modifier.height(12.dp))

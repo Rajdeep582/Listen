@@ -205,9 +205,17 @@ fun SearchScreen(vm: AppViewModel, nav: Nav, mode: Mode) {
         val r = local
         if (mode == Mode.MUSIC && query.isNotBlank()) {
             val counts = linkedMapOf(
-                "Local" to r.songs.size, "Audius" to b?.tracks.orEmpty().count { it.source == "Audius" },
-                "Jamendo" to b?.tracks.orEmpty().count { it.source == "Jamendo" }, "iTunes" to b?.tracks.orEmpty().count { it.source == "iTunes" },
-                "Deezer" to b?.tracks.orEmpty().count { it.source == "Deezer" }, "Archive" to (b?.archive?.size ?: 0), "Radio" to (b?.stations?.size ?: 0),
+                "Local" to r.songs.size,
+                "JioSaavn" to b?.tracks.orEmpty().count { it.source == "JioSaavn" },
+                "FreeToUse" to b?.tracks.orEmpty().count { it.source == "FreeToUse" },
+                "Incompetech" to b?.tracks.orEmpty().count { it.source == "Incompetech" },
+                "Audius" to b?.tracks.orEmpty().count { it.source == "Audius" },
+                "Jamendo" to b?.tracks.orEmpty().count { it.source == "Jamendo" },
+                "ccMixter" to b?.tracks.orEmpty().count { it.source == "ccMixter" },
+                "iTunes" to b?.tracks.orEmpty().count { it.source == "iTunes" },
+                "Deezer" to b?.tracks.orEmpty().count { it.source == "Deezer" },
+                "Archive" to (b?.archive?.size ?: 0),
+                "Radio" to (b?.stations?.size ?: 0),
             )
             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 4.dp)) {
                 items(listOf("All") + counts.keys.filter { counts[it]!! > 0 || it == source }, key = { it }) { k ->
@@ -222,7 +230,7 @@ fun SearchScreen(vm: AppViewModel, nav: Nav, mode: Mode) {
         LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = LocalBottomInset.current)) {
             // ---------- idle: recent searches ----------
             if (query.isBlank()) {
-                if (recents.isEmpty()) item { EmptyState(Icons.Rounded.Search, "Search everything", if (mode == Mode.MUSIC) "Your phone, Audius, Jamendo, iTunes, Deezer, Internet Archive and live radio — in one place." else "Find any video on this phone.") }
+                if (recents.isEmpty()) item { EmptyState(Icons.Rounded.Search, "Search everything", if (mode == Mode.MUSIC) "Your phone, JioSaavn, FreeToUse, Incompetech, Audius, Jamendo, iTunes, Deezer, Internet Archive and live radio — in one place." else "Find any video on this phone.") }
                 else {
                     item(key = "recH") {
                         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {

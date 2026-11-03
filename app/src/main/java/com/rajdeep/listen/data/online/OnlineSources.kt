@@ -20,14 +20,23 @@
  *  [API-8] LRCLIB        https://lrclib.net/api/get|search             → synced lyrics
  *  [API-9] Query suggest  (QuerySuggest.kt) Google suggest, ds=yt      → typing completions
  *  [API-10] AI           (AiClient.kt) Groq (key) or Pollinations (keyless), OpenAI-compatible
+ *  [API-11] ccMixter     https://ccmixter.org/api/query  auth: none  → full CC remixes/originals
+ *  [API-12] ReccoBeats   https://api.reccobeats.com/v1   auth: none  → recommendations (metadata
+ *          only; Spotify-ID based). Used by Recommender.kt, resolved to playable via other APIs.
+ *  [API-13] JioSaavn     https://www.jiosaavn.com/api.php auth: none → Bollywood/Hindi/Indian 320 kbps songs
+ *  [API-14] FreeToUse    https://api.freetouse.com/v3    auth: none  → Lo-Fi, Chill, Beats full MP3 streams
+ *  [API-15] Incompetech  https://incompetech.com         auth: none  → Kevin MacLeod CC-BY 1,440+ tracks
+ *  [API-16] LyricsOvh    https://api.lyrics.ovh/v1       auth: none  → Plain text lyrics fallback
  *  Shared HTTP client: [Http] below (timeouts, User-Agent). Artwork resolution: ArtResolver.kt.
  * ============================================================================================
  */
 package com.rajdeep.listen.data.online
 
+import android.util.Base64
 import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -36,6 +45,8 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import javax.crypto.Cipher
+import javax.crypto.spec.SecretKeySpec
 
 @Immutable
 data class OnlineTrack(
@@ -325,15 +336,344 @@ object InternetArchive {
     }
 }
 
+/** [API-11] ccMixter: free Creative Commons music, full-length MP3 streams, keyless. */
+object CcMixter {
+    private const val BASE = "https://ccmixter.org/api/query"
+
+    private fun secs(ps: String): Long = ps.split(':').fold(0L) { a, p -> a * 60 + (p.toLongOrNull() ?: 0) }
+
+    private fun parse(o: JSONObject): OnlineTrack? {
+        val files = o.optJSONArray("files") ?: return null
+        val f = (0 until files.length()).mapNotNull { files.optJSONObject(it) }
+            .firstOrNull { it.optString("download_url").endsWith(".mp3", true) } ?: return null
+        return OnlineTrack(
+            key = "ccmixter:${o.optLong("upload_id")}",
+            title = o.optString("upload_name"),
+            artist = o.optString("user_real_name").ifEmpty { o.optString("user_name") },
+            album = "ccMixter",
+            artwork = null, // no cover art: ArtResolver / placeholder handles it
+            durationMs = secs(f.optJSONObject("file_format_info")?.optString("ps").orEmpty()) * 1000,
+            streamUrl = f.optString("download_url"),
+            isPreview = false,
+            source = "ccMixter",
+        )
+    }
+
+    suspend fun search(q: String): List<OnlineTrack> {
+        val body = Http.get("$BASE?f=json&sort=rank&limit=20&search=${Http.enc(q)}") ?: return emptyList()
+        return JSONArray(body).mapObj(::parse)
+    }
+}
+
+/** [API-12] ReccoBeats: free, keyless track recommendations (metadata only, Spotify IDs as seeds). */
+object ReccoBeats {
+    private const val BASE = "https://api.reccobeats.com/v1"
+
+    private fun spotifyId(href: String) = href.substringAfterLast('/').substringBefore('?').ifEmpty { null }
+
+    /** Finds a Spotify track ID for a song, to use as a recommendation seed. */
+    suspend fun seedFor(title: String, artist: String): String? {
+        val body = Http.get("$BASE/track/search?searchText=${Http.enc("$title $artist")}") ?: return null
+        val arr = JSONObject(body).optJSONArray("content") ?: return null
+        val a = artist.lowercase().substringBefore(',').trim()
+        val hit = arr.mapObj { it }.firstOrNull { o -> o.optJSONArray("artists")?.optJSONObject(0)?.optString("name").orEmpty().lowercase().contains(a.take(10)) }
+            ?: arr.optJSONObject(0)
+        return hit?.optString("href")?.let(::spotifyId)
+    }
+
+    /** Up to [size] recommended (title, artist) pairs for the given seed IDs (max 5). */
+    suspend fun recommend(seeds: List<String>, size: Int = 30): List<Pair<String, String>> {
+        if (seeds.isEmpty()) return emptyList()
+        val body = Http.get("$BASE/track/recommendation?size=$size&seeds=${seeds.take(5).joinToString(",")}") ?: return emptyList()
+        return JSONObject(body).optJSONArray("content")?.mapObj { o ->
+            val artist = o.optJSONArray("artists")?.optJSONObject(0)?.optString("name").orEmpty()
+            o.optString("trackTitle").takeIf { it.isNotBlank() && artist.isNotBlank() }?.let { it to artist }
+        }.orEmpty()
+    }
+}
+
+/**
+ * [API-13] JioSaavn: official public endpoints for Bollywood/Hindi & Indian music.
+ * Delivers full-length, high-fidelity 320 kbps MP4/AAC streams, metadata, and album artwork.
+ */
+object JioSaavn {
+    private const val BASE = "https://www.jiosaavn.com/api.php"
+    const val SOURCE = "JioSaavn"
+    private const val CIPHER_KEY = "38346591"
+
+    /** Decrypts JioSaavn's DES-ECB encrypted media URL and requests 320 kbps stream. */
+    fun decryptMediaUrl(enc: String): String? = runCatching {
+        if (enc.isBlank()) return@runCatching null
+        val key = SecretKeySpec(CIPHER_KEY.toByteArray(Charsets.UTF_8), "DES")
+        val cipher = Cipher.getInstance("DES/ECB/PKCS5Padding")
+        cipher.init(Cipher.DECRYPT_MODE, key)
+        val decoded = Base64.decode(enc, Base64.DEFAULT)
+        val decrypted = String(cipher.doFinal(decoded), Charsets.UTF_8)
+        decrypted.replace("_96.mp4", "_320.mp4")
+            .replace("_96_p.mp4", "_320.mp4")
+            .replace("_160.mp4", "_320.mp4")
+    }.getOrNull()
+
+    private fun unescape(s: String): String =
+        s.replace("&quot;", "\"")
+            .replace("&#039;", "'")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .trim()
+
+    private fun parseTrack(o: JSONObject): OnlineTrack? {
+        val id = o.optString("id").ifEmpty { return null }
+        val title = unescape(o.optString("song").ifEmpty { o.optString("title") })
+        if (title.isBlank()) return null
+        val singer = unescape(o.optString("singers").ifEmpty {
+            o.optString("primary_artists").ifEmpty { o.optString("description") }
+        })
+        val album = unescape(o.optString("album").ifEmpty { "JioSaavn" })
+        val image = o.optString("image").replace("150x150", "500x500").replace("50x50", "500x500").ifEmpty { null }
+        val durationMs = o.optLong("duration") * 1000L
+
+        val enc = o.optString("encrypted_media_url")
+        val streamUrl = decryptMediaUrl(enc) ?: o.optString("media_preview_url").ifEmpty { null }
+        if (streamUrl.isNullOrBlank()) return null
+
+        return OnlineTrack(
+            key = "saavn:$id",
+            title = title,
+            artist = singer.ifEmpty { "Various Artists" },
+            album = album,
+            artwork = image,
+            durationMs = durationMs,
+            streamUrl = streamUrl,
+            isPreview = false,
+            source = SOURCE,
+        )
+    }
+
+    /** Search tracks via JioSaavn getResults API, with fallback to autocomplete + song details. */
+    suspend fun search(q: String): List<OnlineTrack> = withContext(Dispatchers.IO) {
+        val searchUrl = "$BASE?__call=search.getResults&_format=json&_marker=0&cc=in&includeMetaTags=1&p=1&n=20&q=${Http.enc(q)}"
+        val body = Http.get(searchUrl)
+        if (!body.isNullOrBlank()) {
+            val results = runCatching { JSONObject(body).optJSONArray("results") }.getOrNull()
+            if (results != null && results.length() > 0) {
+                val list = (0 until results.length()).mapNotNull { results.optJSONObject(it)?.let(::parseTrack) }
+                if (list.isNotEmpty()) return@withContext list
+            }
+        }
+
+        // Fallback: autocomplete.get -> fetch details for found IDs
+        val autoUrl = "$BASE?__call=autocomplete.get&_format=json&_marker=0&cc=in&includeMetaTags=1&query=${Http.enc(q)}"
+        val autoBody = Http.get(autoUrl) ?: return@withContext emptyList()
+        val songArr = runCatching {
+            JSONObject(autoBody).optJSONObject("songs")?.optJSONArray("data")
+        }.getOrNull() ?: return@withContext emptyList()
+
+        val pids = (0 until songArr.length()).mapNotNull { songArr.optJSONObject(it)?.optString("id") }.filter { it.isNotBlank() }
+        if (pids.isEmpty()) return@withContext emptyList()
+
+        val detailUrl = "$BASE?__call=song.getDetails&pids=${pids.joinToString(",")}&_format=json"
+        val detailBody = Http.get(detailUrl) ?: return@withContext emptyList()
+        val detailObj = runCatching { JSONObject(detailBody) }.getOrNull() ?: return@withContext emptyList()
+
+        pids.mapNotNull { pid ->
+            detailObj.optJSONObject(pid)?.let(::parseTrack)
+        }
+    }
+
+    /** Top Hindi hits playlist for trending recommendations. */
+    suspend fun topHindi(): List<OnlineTrack> = withContext(Dispatchers.IO) {
+        val url = "$BASE?__call=playlist.getDetails&listid=1134543272&_format=json"
+        val body = Http.get(url) ?: return@withContext emptyList()
+        val songs = runCatching { JSONObject(body).optJSONArray("songs") }.getOrNull() ?: return@withContext emptyList()
+        (0 until songs.length()).mapNotNull { songs.optJSONObject(it)?.let(::parseTrack) }
+    }
+}
+
+/**
+ * [API-14] Free To Use Music: Open, keyless music API (OpenAPI 3.0).
+ * High-quality Lo-Fi, Chill, Ambient, Beats, Cinematic, and Electronic tracks
+ * under royalty-free / Creative Commons licenses. Direct MP3 files and WebP artwork.
+ */
+object FreeToUse {
+    private const val BASE = "https://api.freetouse.com/v3/music/tracks"
+    const val SOURCE = "FreeToUse"
+
+    private fun parseArtists(arr: JSONArray?): String {
+        if (arr == null) return "Free To Use"
+        val names = mutableListOf<String>()
+        for (i in 0 until arr.length()) {
+            val elem = arr.opt(i)
+            if (elem is JSONArray && elem.length() > 1) {
+                elem.optJSONObject(1)?.optString("name")?.takeIf { it.isNotBlank() }?.let { names.add(it) }
+            } else if (elem is JSONObject) {
+                elem.optString("name").takeIf { it.isNotBlank() }?.let { names.add(it) }
+            }
+        }
+        return if (names.isEmpty()) "Free To Use" else names.joinToString(", ")
+    }
+
+    private fun parse(o: JSONObject): OnlineTrack? {
+        val id = o.optString("id").ifEmpty { return null }
+        val title = o.optString("title").ifEmpty { return null }
+        val files = o.optJSONObject("files")
+        val streamUrl = files?.optString("mp3")?.ifEmpty { null } ?: return null
+        val thumbs = o.optJSONObject("thumbnails")
+        val art = thumbs?.optString("xl")?.ifEmpty { null }
+            ?: thumbs?.optString("lg")?.ifEmpty { null }
+            ?: thumbs?.optString("md")?.ifEmpty { null }
+        val durationMs = (o.optDouble("duration", 0.0) * 1000).toLong()
+        val genre = o.optString("genre").ifEmpty { "FreeToUse" }
+
+        return OnlineTrack(
+            key = "ftu:$id",
+            title = title,
+            artist = parseArtists(o.optJSONArray("artists")),
+            album = genre,
+            artwork = art,
+            durationMs = durationMs,
+            streamUrl = streamUrl,
+            isPreview = false,
+            source = SOURCE,
+        )
+    }
+
+    suspend fun search(q: String): List<OnlineTrack> = withContext(Dispatchers.IO) {
+        val body = Http.get("$BASE/search?query=${Http.enc(q)}") ?: return@withContext emptyList()
+        val arr = runCatching { JSONObject(body).optJSONArray("data") }.getOrNull() ?: return@withContext emptyList()
+        (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.let(::parse) }
+    }
+
+    suspend fun popular(): List<OnlineTrack> = withContext(Dispatchers.IO) {
+        val body = Http.get("$BASE/search?query=") ?: return@withContext emptyList()
+        val arr = runCatching { JSONObject(body).optJSONArray("data") }.getOrNull() ?: return@withContext emptyList()
+        (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.let(::parse) }
+    }
+}
+
+/**
+ * [API-15] Incompetech: 1,440+ Creative Commons (CC-BY) compositions by Kevin MacLeod.
+ * Covers Classical, Orchestral, Soundtrack, Film Score, Jazz, Celtic, Ambient, and World music.
+ * Direct MP3 streaming, byte-range seekable. Keyless.
+ */
+object Incompetech {
+    private const val CATALOG_URL = "https://incompetech.com/music/royalty-free/pieces.json"
+    private const val STREAM_BASE = "https://incompetech.com/music/royalty-free/mp3-royaltyfree"
+    const val SOURCE = "Incompetech"
+
+    @Volatile
+    private var cachedPieces: List<Piece>? = null
+
+    private data class Piece(
+        val title: String,
+        val filename: String,
+        val lengthMs: Long,
+        val genre: String,
+        val feel: String,
+        val instruments: String,
+        val description: String,
+    ) {
+        fun toOnlineTrack(): OnlineTrack {
+            val encodedName = Http.enc(filename).replace("+", "%20")
+            return OnlineTrack(
+                key = "incompetech:${Http.enc(title)}",
+                title = title,
+                artist = "Kevin MacLeod",
+                album = feel.ifEmpty { "Incompetech" },
+                artwork = null,
+                durationMs = lengthMs,
+                streamUrl = "$STREAM_BASE/$encodedName",
+                isPreview = false,
+                source = SOURCE,
+                extra = listOfNotNull(genre.takeIf { it.isNotBlank() }, instruments.takeIf { it.isNotBlank() }).joinToString(" • "),
+            )
+        }
+    }
+
+    private fun parseLength(s: String): Long {
+        val parts = s.split(':').mapNotNull { it.toLongOrNull() }
+        return when (parts.size) {
+            3 -> (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000L
+            2 -> (parts[0] * 60 + parts[1]) * 1000L
+            1 -> parts[0] * 1000L
+            else -> 0L
+        }
+    }
+
+    private suspend fun getCatalog(): List<Piece> = withContext(Dispatchers.IO) {
+        cachedPieces?.let { return@withContext it }
+        val body = Http.get(CATALOG_URL) ?: return@withContext emptyList()
+        val arr = runCatching { JSONArray(body) }.getOrNull() ?: return@withContext emptyList()
+        val list = (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val title = o.optString("title").ifEmpty { return@mapNotNull null }
+            val file = o.optString("filename").ifEmpty { return@mapNotNull null }
+            Piece(
+                title = title,
+                filename = file,
+                lengthMs = parseLength(o.optString("length")),
+                genre = o.optString("genre"),
+                feel = o.optString("feel"),
+                instruments = o.optString("instruments"),
+                description = o.optString("description"),
+            )
+        }
+        cachedPieces = list
+        list
+    }
+
+    suspend fun search(q: String): List<OnlineTrack> = withContext(Dispatchers.IO) {
+        val query = q.trim().lowercase()
+        if (query.isBlank()) return@withContext emptyList()
+        val catalog = getCatalog()
+        catalog.filter { p ->
+            p.title.lowercase().contains(query) ||
+            p.feel.lowercase().contains(query) ||
+            p.instruments.lowercase().contains(query) ||
+            p.description.lowercase().contains(query)
+        }.take(25).map { it.toOnlineTrack() }
+    }
+}
+
+/**
+ * [API-16] Lyrics.ovh: Free public lyrics API. Keyless fallback for plain text lyrics.
+ */
+object LyricsOvh {
+    suspend fun fetch(artist: String, title: String): String? = withContext(Dispatchers.IO) {
+        val cleanArtist = artist.substringBefore(',').substringBefore('&').substringBefore("feat").trim()
+        val cleanTitle = title.replace(Regex("""\s*[\(\[].*?[\)\]]"""), "").trim()
+        if (cleanArtist.isBlank() || cleanTitle.isBlank()) return@withContext null
+        val url = "https://api.lyrics.ovh/v1/${Http.enc(cleanArtist)}/${Http.enc(cleanTitle)}"
+        val body = runCatching { Http.get(url) }.getOrNull() ?: return@withContext null
+        runCatching {
+            JSONObject(body).optString("lyrics").takeIf { it.isNotBlank() }
+        }.getOrNull()
+    }
+}
+
 object OnlineCatalog {
     suspend fun search(q: String): List<OnlineTrack> = coroutineScope {
+        val js = async { runCatching { JioSaavn.search(q) }.getOrDefault(emptyList()) }
+        val ftu = async { runCatching { FreeToUse.search(q) }.getOrDefault(emptyList()) }
+        val inc = async { runCatching { Incompetech.search(q) }.getOrDefault(emptyList()) }
         val a = async { runCatching { Audius.search(q) }.getOrDefault(emptyList()) }
         val j = async { runCatching { Jamendo.search(q) }.getOrDefault(emptyList()) }
+        val cc = async { runCatching { CcMixter.search(q) }.getOrDefault(emptyList()) }
         val d = async { runCatching { Deezer.search(q) }.getOrDefault(emptyList()) }
         val i = async { runCatching { ITunes.search(q) }.getOrDefault(emptyList()) }
+
         // full tracks first, previews last; drop preview duplicates of the same song
-        val full = a.await().take(15) + j.await().take(15)
-        val previews = (i.await() + d.await()).distinctBy { (it.title.lowercase().take(24)) + "|" + it.artist.lowercase().take(16) }
+        val full = js.await().take(15) +
+                   ftu.await().take(15) +
+                   inc.await().take(15) +
+                   a.await().take(15) +
+                   j.await().take(15) +
+                   cc.await().take(10)
+
+        val previews = (i.await() + d.await()).distinctBy {
+            (it.title.lowercase().take(24)) + "|" + it.artist.lowercase().take(16)
+        }
+
         full + previews.take(30)
     }
 }
@@ -343,21 +683,40 @@ object Lrclib {
     data class Result(val synced: String?, val plain: String?)
 
     suspend fun fetch(title: String, artist: String, album: String, durationSec: Long): Result? {
-        val exact = Http.get(
-            "https://lrclib.net/api/get?track_name=${Http.enc(title)}&artist_name=${Http.enc(artist)}" +
-                "&album_name=${Http.enc(album)}&duration=$durationSec"
-        )
-        if (exact != null) return JSONObject(exact).toResult()
-        val search = Http.get("https://lrclib.net/api/search?track_name=${Http.enc(title)}&artist_name=${Http.enc(artist)}")
-            ?: return null
-        val arr = JSONArray(search)
-        if (arr.length() == 0) return null
-        // prefer synced + closest duration
-        val best = arr.mapObj { it }.minByOrNull {
-            val d = kotlin.math.abs(it.optDouble("duration", 0.0) - durationSec)
-            d + if (it.optString("syncedLyrics").isNullOrEmpty() || it.isNull("syncedLyrics")) 1000 else 0
-        } ?: return null
-        return best.toResult()
+        val exact = runCatching {
+            Http.get(
+                "https://lrclib.net/api/get?track_name=${Http.enc(title)}&artist_name=${Http.enc(artist)}" +
+                    "&album_name=${Http.enc(album)}&duration=$durationSec"
+            )
+        }.getOrNull()
+        if (exact != null) {
+            val res = JSONObject(exact).toResult()
+            if (res != null) return res
+        }
+
+        val search = runCatching {
+            Http.get("https://lrclib.net/api/search?track_name=${Http.enc(title)}&artist_name=${Http.enc(artist)}")
+        }.getOrNull()
+        if (!search.isNullOrBlank()) {
+            val arr = runCatching { JSONArray(search) }.getOrNull()
+            if (arr != null && arr.length() > 0) {
+                // prefer synced + closest duration
+                val best = arr.mapObj { it }.minByOrNull {
+                    val d = kotlin.math.abs(it.optDouble("duration", 0.0) - durationSec)
+                    d + if (it.optString("syncedLyrics").isNullOrEmpty() || it.isNull("syncedLyrics")) 1000 else 0
+                }
+                val res = best?.toResult()
+                if (res != null) return res
+            }
+        }
+
+        // Fallback to Lyrics.ovh for plain text lyrics
+        val ovh = LyricsOvh.fetch(artist, title)
+        if (!ovh.isNullOrBlank()) {
+            return Result(synced = null, plain = ovh)
+        }
+
+        return null
     }
 
     private fun JSONObject.toResult(): Result? {
