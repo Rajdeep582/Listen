@@ -190,6 +190,10 @@ class PlayerConnection(private val context: Context, private val library: Librar
     fun removeAt(index: Int) = withController { it.removeMediaItem(index) }
     fun move(from: Int, to: Int) = withController { it.moveMediaItem(from, to) }
     fun clearQueue() = withController { it.clearMediaItems() }
+    fun stop() = withController {
+        it.stop()
+        it.clearMediaItems()
+    }
     fun toggleShuffle() = withController { it.shuffleModeEnabled = !it.shuffleModeEnabled }
     fun cycleRepeat() = withController { c ->
         c.repeatMode = when (c.repeatMode) {

@@ -115,6 +115,7 @@ fun MiniPlayer(player: PlayerConnection, state: PlayerUiState, onExpand: () -> U
                     when {
                         axis == 2 && dragY > dismissThreshold -> {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            player.stop()
                             latestOnDismiss()
                         }
                         axis == 1 && dragX < -swipeThreshold -> {

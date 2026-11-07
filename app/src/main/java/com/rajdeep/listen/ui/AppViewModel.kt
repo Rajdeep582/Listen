@@ -86,6 +86,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun signOut() {
+        player.stop()
         c.account.signOut(); _accountUser.value = null
         _onlineFavorites.value = emptyList()
         viewModelScope.launch { c.library.dao.replaceFavorites(emptyList()) }
