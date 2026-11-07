@@ -20,8 +20,8 @@ android {
         applicationId = "com.rajdeep.listen"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.5.0"
+        versionCode = 6
+        versionName = "1.6.0"
         // Ship only real-device ABIs; drop x86 to keep APK small.
         // Optional: free key from console.groq.com → fast AI suggestions (else keyless fallback is used).
         buildConfigField("String", "GROQ_API_KEY", "\"${secrets.getProperty("GROQ_API_KEY", "")}\"")

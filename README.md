@@ -10,7 +10,7 @@ A premium Android player: streaming-app polish for music, VLC-grade power for vi
 ![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white)
 ![Media3](https://img.shields.io/badge/Media3-ExoPlayer-FF6A3D)
 ![libVLC](https://img.shields.io/badge/libVLC-3.6-FF8800?logo=vlcmediaplayer&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.5.0-8B5CF6)
+![Version](https://img.shields.io/badge/version-1.6.0-8B5CF6)
 
 </div>
 
