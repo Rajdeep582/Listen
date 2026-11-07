@@ -69,6 +69,7 @@ class PlayerConnection(private val context: Context, private val library: Librar
     val state: StateFlow<PlayerUiState> = _state.asStateFlow()
     private var sleepJob: Job? = null
 
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     fun connect() {
         if (controller != null) return
         scope.launch(Dispatchers.Main) {

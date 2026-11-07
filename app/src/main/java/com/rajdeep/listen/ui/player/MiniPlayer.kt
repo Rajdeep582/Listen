@@ -16,7 +16,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
@@ -51,7 +52,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.rajdeep.listen.playback.PlayerConnection
@@ -65,52 +69,74 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 @Composable
-fun MiniPlayer(player: PlayerConnection, state: PlayerUiState, onExpand: () -> Unit, modifier: Modifier = Modifier) {
+fun MiniPlayer(player: PlayerConnection, state: PlayerUiState, onExpand: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     val np = state.current ?: return
     val accent = LocalAccent.current
     val colors = rememberArtColors(com.rajdeep.listen.ui.components.rememberArtModel(np.artwork, np.artLookup()))
     val scope = rememberCoroutineScope()
     var dragX by remember { mutableFloatStateOf(0f) }
+    var dragY by remember { mutableFloatStateOf(0f) }
     val haptic = LocalHapticFeedback.current
+    val dismissThreshold = with(LocalDensity.current) { 72.dp.toPx() }
+    val swipeThreshold = with(LocalDensity.current) { 64.dp.toPx() }
+    val latestOnDismiss by androidx.compose.runtime.rememberUpdatedState(onDismiss)
 
     Box(
         modifier = modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(18.dp))
             .background(Brush.horizontalGradient(listOf(colors.dark, androidx.compose.ui.graphics.lerp(Palette.SurfaceHigh, accent.primary, 0.14f))))
             .border(1.dp, Brush.horizontalGradient(listOf(accent.primary.copy(alpha = 0.45f), accent.secondary.copy(alpha = 0.15f))), RoundedCornerShape(18.dp))
             .clickable(onClick = onExpand)
+            .graphicsLayer { translationY = dragY }
             .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragEnd = {
-                        val v = dragX
-                        if (v < -140f) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    var axis = 0 // 1 = horizontal track control, 2 = downward dismissal
+                    var totalX = 0f
+                    var totalY = 0f
+                    dragX = 0f
+                    dragY = 0f
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+                        val delta = change.positionChange()
+                        totalX += delta.x
+                        totalY += delta.y
+                        if (axis == 0 && (abs(totalX) > viewConfiguration.touchSlop || abs(totalY) > viewConfiguration.touchSlop)) {
+                            axis = if (abs(totalX) > abs(totalY)) 1 else 2
+                        }
+                        if (axis != 0) {
+                            change.consume()
+                            if (axis == 1) dragX = totalX.coerceIn(-260f, 260f)
+                            else dragY = totalY.coerceIn(-40f, 360f)
+                        }
+                    }
+
+                    when {
+                        axis == 2 && dragY > dismissThreshold -> {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            latestOnDismiss()
+                        }
+                        axis == 1 && dragX < -swipeThreshold -> {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             player.next()
-                        } else if (v > 140f) {
+                            scope.launch {
+                                androidx.compose.animation.core.animate(dragX, 0f, animationSpec = spring(dampingRatio = 0.65f, stiffness = 800f)) { cur, _ -> dragX = cur }
+                            }
+                        }
+                        axis == 1 && dragX > swipeThreshold -> {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             player.previous()
+                            scope.launch {
+                                androidx.compose.animation.core.animate(dragX, 0f, animationSpec = spring(dampingRatio = 0.65f, stiffness = 800f)) { cur, _ -> dragX = cur }
+                            }
                         }
-                        scope.launch {
-                            androidx.compose.animation.core.animate(
-                                initialValue = dragX,
-                                targetValue = 0f,
-                                animationSpec = spring(dampingRatio = 0.65f, stiffness = 800f)
-                            ) { cur, _ -> dragX = cur }
+                        else -> scope.launch {
+                            androidx.compose.animation.core.animate(dragX, 0f, animationSpec = spring(dampingRatio = 0.65f, stiffness = 800f)) { cur, _ -> dragX = cur }
+                            androidx.compose.animation.core.animate(dragY, 0f, animationSpec = spring(dampingRatio = 0.65f, stiffness = 800f)) { cur, _ -> dragY = cur }
                         }
-                    },
-                    onDragCancel = {
-                        scope.launch {
-                            androidx.compose.animation.core.animate(
-                                initialValue = dragX,
-                                targetValue = 0f,
-                                animationSpec = spring(dampingRatio = 0.65f, stiffness = 800f)
-                            ) { cur, _ -> dragX = cur }
-                        }
-                    },
-                    onHorizontalDrag = { ch, d ->
-                        ch.consume()
-                        dragX = (dragX + d).coerceIn(-260f, 260f)
-                    },
-                )
+                    }
+                }
             },
     ) {
         Row(
@@ -119,20 +145,20 @@ fun MiniPlayer(player: PlayerConnection, state: PlayerUiState, onExpand: () -> U
         ) {
             Artwork(np.artwork, np.album, Modifier.size(48.dp), RoundedCornerShape(12.dp), lookup = np.artLookup())
             Spacer(Modifier.width(12.dp))
-            AnimatedContent(np.mediaId, Modifier.weight(1f), transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "mini") { _ ->
+            AnimatedContent(np, Modifier.weight(1f), transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "mini") { track ->
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            np.title,
+                            track.title,
                             style = MaterialTheme.typography.titleSmall,
                             color = Palette.Text,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false).basicMarquee()
                         )
-                        if (np.isPreview) { Spacer(Modifier.width(6.dp)); Badge("Preview") }
+                        if (track.isPreview) { Spacer(Modifier.width(6.dp)); Badge("Preview") }
                     }
-                    Text(np.artist, style = MaterialTheme.typography.bodySmall, color = Palette.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Palette.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             Spacer(Modifier.width(8.dp))

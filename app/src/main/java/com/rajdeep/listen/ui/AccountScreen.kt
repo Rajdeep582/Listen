@@ -1,6 +1,7 @@
 package com.rajdeep.listen.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
@@ -41,12 +43,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import com.rajdeep.listen.data.AccountUser
 import com.rajdeep.listen.ui.theme.LocalAccent
 import com.rajdeep.listen.ui.theme.Palette
 import com.rajdeep.listen.video.PillButton
 import kotlinx.coroutines.launch
-import org.json.JSONArray
 
 @Composable
 fun AccountScreen(vm: AppViewModel, onAuthenticated: () -> Unit, onSignOut: () -> Unit) {
@@ -173,12 +177,7 @@ private fun AccountField(
 }
 
 @Composable
-fun ProfileScreen(vm: AppViewModel, user: AccountUser?, onSignOut: () -> Unit) {
-    var favorites by remember { mutableStateOf<JSONArray?>(null) }
-    var history by remember { mutableStateOf<JSONArray?>(null) }
-    LaunchedEffect(user?.id) {
-        favorites = vm.cloudFavorites(); history = vm.cloudHistory()
-    }
+fun ProfileScreen(user: AccountUser?, onFavorites: () -> Unit, onSettings: () -> Unit, onSignOut: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 12.dp)) {
         Text("Your profile", style = MaterialTheme.typography.displaySmall, color = Palette.Text)
         Spacer(Modifier.height(18.dp))
@@ -187,29 +186,27 @@ fun ProfileScreen(vm: AppViewModel, user: AccountUser?, onSignOut: () -> Unit) {
             Text(user?.username ?: "Guest", style = MaterialTheme.typography.headlineSmall, color = Palette.Text, modifier = Modifier.padding(top = 4.dp))
             if (!user?.createdAt.isNullOrBlank()) Text("Member since ${user?.createdAt?.take(10)}", style = MaterialTheme.typography.bodySmall, color = Palette.TextDim, modifier = Modifier.padding(top = 6.dp))
         }
-        Spacer(Modifier.height(14.dp))
-        ProfileList("Cloud favourites", favorites, "No saved favourites yet.")
-        Spacer(Modifier.height(14.dp))
-        ProfileList("Recently played", history, "Your listening history will appear here.")
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(16.dp))
+        ProfileOptionRow(Icons.Rounded.Favorite, "Favourites", "Your saved music", onFavorites)
+        Spacer(Modifier.height(10.dp))
+        ProfileOptionRow(Icons.Rounded.Settings, "Settings", "Music, playback, appearance, and app options", onSettings)
+        Spacer(Modifier.height(18.dp))
         PillButton("Sign out", filled = false, onClick = onSignOut)
         Spacer(Modifier.height(20.dp))
     }
 }
 
 @Composable
-private fun ProfileList(title: String, items: JSONArray?, empty: String) {
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Palette.Surface).padding(18.dp)) {
-        Text(title, style = MaterialTheme.typography.titleLarge, color = Palette.Text)
-        Spacer(Modifier.height(8.dp))
-        if (items == null) Text("Connect to load account data.", style = MaterialTheme.typography.bodySmall, color = Palette.TextDim)
-        else if (items.length() == 0) Text(empty, style = MaterialTheme.typography.bodySmall, color = Palette.TextDim)
-        else repeat(items.length()) { i ->
-            val item = items.optJSONObject(i) ?: return@repeat
-            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                Text(item.optString("title"), style = MaterialTheme.typography.titleSmall, color = Palette.Text)
-                Text(item.optString("artist"), style = MaterialTheme.typography.bodySmall, color = Palette.TextDim)
-            }
+private fun ProfileOptionRow(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Palette.Surface).clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = LocalAccent.current.primary)
+        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = Palette.Text)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Palette.TextDim)
         }
+        Icon(Icons.AutoMirrored.Rounded.ArrowForward, "Open $title", tint = Palette.TextFaint)
     }
 }

@@ -21,6 +21,8 @@ import java.net.URL
 data class AccountUser(val id: String, val username: String, val createdAt: String = "", val lastLoginAt: String = "")
 data class AccountSession(val token: String, val user: AccountUser)
 data class AccountFavorite(val songId: String, val title: String, val artist: String, val album: String, val artwork: String)
+data class PendingFavoriteChange(val favorite: AccountFavorite, val shouldBeFavorite: Boolean)
+data class AccountHistoryItem(val songId: String, val title: String, val artist: String, val album: String, val artwork: String)
 private class ApiStatusException(val status: Int, message: String) : IllegalStateException(message)
 
 /** All account traffic goes over HTTPS to the API; Mongo credentials never enter the client. */
@@ -48,7 +50,7 @@ class AccountClient(context: Context) {
     val user: AccountUser? get() = prefs.getString("user", null)?.let {
         runCatching { JSONObject(it).toUser() }.getOrNull()
     }
-    fun signOut() { prefs.edit().clear().apply() }
+    fun signOut() { prefs.edit().remove("token").remove("user").apply() }
 
     suspend fun signUp(username: String, password: String) = auth("signup", username, password)
     suspend fun signIn(username: String, password: String) = auth("signin", username, password)
@@ -105,11 +107,16 @@ class AccountClient(context: Context) {
     suspend fun recordSearch(query: String) = withContext(Dispatchers.IO) { perform("POST", "v1/searches", JSONObject().put("query", query)) }
     suspend fun favorites(): JSONArray = withContext(Dispatchers.IO) { requestArray("GET", "v1/favorites") }
     fun pendingFavoriteAdds(ownerId: String): List<AccountFavorite> {
+        return pendingFavoriteChanges(ownerId).filter { it.shouldBeFavorite && !it.favorite.songId.startsWith("local:") }.map { it.favorite }
+    }
+    fun pendingFavoriteChanges(ownerId: String): List<PendingFavoriteChange> {
         val queued = runCatching { JSONObject(prefs.getString("pending_favorites_$ownerId", "{}") ?: "{}") }.getOrDefault(JSONObject())
         return queued.keys().asSequence().toList().mapNotNull { id ->
             val entry = queued.optJSONObject(id) ?: return@mapNotNull null
-            if (!entry.optBoolean("favorite") || id.startsWith("local:")) return@mapNotNull null
-            AccountFavorite(id, entry.optString("title"), entry.optString("artist"), entry.optString("album"), entry.optString("artwork"))
+            PendingFavoriteChange(
+                AccountFavorite(id, entry.optString("title"), entry.optString("artist"), entry.optString("album"), entry.optString("artwork")),
+                entry.optBoolean("favorite"),
+            )
         }
     }
     suspend fun history(): JSONArray = withContext(Dispatchers.IO) { requestArray("GET", "v1/history") }

@@ -34,7 +34,6 @@ import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -148,7 +147,7 @@ fun ExpandedPlayer(
     val drift = inf.animateFloat(0f, if (reduce) 0f else 1f, infiniteRepeatable(tween(14_000, easing = LinearEasing), RepeatMode.Reverse), label = "drift")
     val dragY = remember { Animatable(0f) }
 
-    BoxWithConstraints(
+    Box(
         Modifier.fillMaxSize()
             .graphicsLayer { translationY = dragY.value.coerceAtLeast(0f) }
             .background(Palette.Ink)

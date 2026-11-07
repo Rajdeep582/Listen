@@ -17,12 +17,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import com.rajdeep.listen.data.AccountUser
 import com.rajdeep.listen.data.AccountFavorite
+import com.rajdeep.listen.data.AccountHistoryItem
 
 sealed interface Remote<out T> {
     data object Loading : Remote<Nothing>
@@ -41,6 +43,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val accountReady: StateFlow<Boolean> = _accountReady.asStateFlow()
     private val _onlineFavorites = MutableStateFlow(c.account.user?.id?.let(c.account::pendingFavoriteAdds).orEmpty())
     val onlineFavorites: StateFlow<List<AccountFavorite>> = _onlineFavorites.asStateFlow()
+    private val _onlineHistory = MutableStateFlow<List<AccountHistoryItem>>(emptyList())
+    val onlineHistory: StateFlow<List<AccountHistoryItem>> = _onlineHistory.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -52,10 +56,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             _accountReady.value = true
         }
         viewModelScope.launch {
+            _accountUser.collectLatest { user ->
+                if (user == null) _onlineHistory.value = emptyList()
+                else runCatching { refreshCloudHistory() }
+            }
+        }
+        viewModelScope.launch {
             kotlinx.coroutines.flow.combine(player.state, _accountUser) { state, user ->
                 val track = state.current
                 if (user != null && track != null && track.localId == null && !track.isLive) user to track else null
             }.filterNotNull().distinctUntilChangedBy { "${it.first.id}:${it.second.mediaId}" }.collect { (_, track) ->
+                val historyItem = AccountHistoryItem(track.mediaId, track.title, track.artist, track.album, track.artwork?.toString().orEmpty())
+                _onlineHistory.value = listOf(historyItem) + _onlineHistory.value.filterNot { it.songId == historyItem.songId }
                 runCatching { c.account.recordPlay(track.mediaId, track.title, track.artist, track.album, track.artwork?.toString().orEmpty()) }
             }
         }
@@ -80,24 +92,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
     private suspend fun syncCloudFavorites() {
         val ownerId = _accountUser.value?.id ?: return
-        if (!c.account.flushPendingFavorites(ownerId)) return
+        // A failed offline write must not block the separate read that restores saved favourites.
+        runCatching { c.account.flushPendingFavorites(ownerId) }
         val records = c.account.favorites()
+        val pending = c.account.pendingFavoriteChanges(ownerId).associateBy { it.favorite.songId }
         val ids = buildList {
             repeat(records.length()) { i ->
                 val id = records.optJSONObject(i)?.optString("songId").orEmpty()
-                if (id.startsWith("local:")) id.removePrefix("local:").toLongOrNull()?.let(::add)
+                if (id.startsWith("local:") && pending[id]?.shouldBeFavorite != false) id.removePrefix("local:").toLongOrNull()?.let(::add)
             }
-        }
+            pending.values.filter { it.shouldBeFavorite && it.favorite.songId.startsWith("local:") }
+                .mapNotNull { it.favorite.songId.removePrefix("local:").toLongOrNull() }.forEach(::add)
+        }.distinct()
         c.library.dao.replaceFavorites(ids)
         _onlineFavorites.value = buildList {
             repeat(records.length()) { i ->
                 val item = records.optJSONObject(i) ?: return@repeat
                 val id = item.optString("songId")
-                if (id.isNotBlank() && !id.startsWith("local:")) add(
+                if (id.isNotBlank() && !id.startsWith("local:") && pending[id]?.shouldBeFavorite != false) add(
                     AccountFavorite(id, item.optString("title"), item.optString("artist"), item.optString("album"), item.optString("artwork")),
                 )
             }
-        }
+            pending.values.filter { it.shouldBeFavorite && !it.favorite.songId.startsWith("local:") }
+                .forEach { add(it.favorite) }
+        }.distinctBy { it.songId }
     }
 
     fun isOnlineFavorite(songId: String) = _onlineFavorites.value.any { it.songId == songId }
@@ -128,6 +146,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun recordSearch(query: String) = viewModelScope.launch { if (c.account.token != null) runCatching { c.account.recordSearch(query) } }
     suspend fun cloudFavorites() = runCatching { c.account.favorites() }.getOrNull()
     suspend fun cloudHistory() = runCatching { c.account.history() }.getOrNull()
+    private suspend fun refreshCloudHistory() {
+        val records = c.account.history()
+        _onlineHistory.value = buildList {
+            repeat(records.length()) { i ->
+                val item = records.optJSONObject(i) ?: return@repeat
+                val id = item.optString("songId")
+                if (id.isNotBlank() && !id.startsWith("local:")) add(
+                    AccountHistoryItem(id, item.optString("title"), item.optString("artist"), item.optString("album"), item.optString("artwork")),
+                )
+            }
+        }
+    }
 
     private fun <T> Flow<T>.cached(initial: T): StateFlow<T> = stateIn(viewModelScope, SharingStarted.WhileSubscribed(15_000), initial)
 

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -119,10 +120,11 @@ fun ArtistScreen(vm: AppViewModel, nav: Nav, artist: String) {
     val albums by remember(artist) { vm.library.dao.artistAlbums(artist) }.collectAsStateWithLifecycle(emptyList())
     SongsColumn(vm, songs, "No songs", "", header = {
         Column {
-            val photo by androidx.compose.runtime.produceState<Any?>(null, artist) {
-                value = com.rajdeep.listen.data.online.ArtResolver.resolve(com.rajdeep.listen.ui.components.artistLookup(artist))
+            val photo = remember(artist) { mutableStateOf<Any?>(null) }
+            androidx.compose.runtime.LaunchedEffect(artist) {
+                photo.value = com.rajdeep.listen.data.online.ArtResolver.resolve(com.rajdeep.listen.ui.components.artistLookup(artist))
             }
-            DetailHeader(photo ?: albums.firstOrNull()?.let { albumArtUri(it.albumId) }, artist, artist, "Artist", meta(songs), nav, circle = true)
+            DetailHeader(photo.value ?: albums.firstOrNull()?.let { albumArtUri(it.albumId) }, artist, artist, "Artist", meta(songs), nav, circle = true)
             if (albums.size > 1 || (albums.size == 1 && albums[0].songCount > 1)) {
                 SectionHeader("Albums")
                 LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(14.dp)) {
@@ -182,6 +184,10 @@ fun SongListScreen(vm: AppViewModel, nav: Nav, kind: String) {
         FavouritesScreen(vm, nav)
         return
     }
+    if (kind == "recent") {
+        RecentlyPlayedScreen(vm, nav)
+        return
+    }
     val (title, flow) = when (kind) {
         "recent" -> "Recently played" to vm.recentlyPlayed
         "most" -> "On repeat" to vm.mostPlayed
@@ -191,6 +197,55 @@ fun SongListScreen(vm: AppViewModel, nav: Nav, kind: String) {
     SongsColumn(vm, songs, "Nothing here yet", "Keep listening — this fills up automatically.", sortable = kind == "favourites", header = {
         DetailHeader(songs?.firstOrNull()?.let { albumArtUri(it.albumId) }, title, title, "Auto playlist", meta(songs), nav)
     })
+}
+
+@Composable
+private fun RecentlyPlayedScreen(vm: AppViewModel, nav: Nav) {
+    val context = LocalContext.current
+    val local by vm.recentlyPlayed.collectAsStateWithLifecycle()
+    val online by vm.onlineHistory.collectAsStateWithLifecycle()
+    val onlineFavorites by vm.onlineFavorites.collectAsStateWithLifecycle()
+    val songs = local.orEmpty()
+    val total = songs.size + online.size
+
+    LazyColumn(
+        Modifier.fillMaxWidth().fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = LocalBottomInset.current),
+    ) {
+        item(key = "recently-played-header") {
+            DetailHeader(
+                songs.firstOrNull()?.let { albumArtUri(it.albumId) } ?: online.firstOrNull()?.artwork,
+                "recent", "Recently played", "Your listening history", "$total songs", nav,
+                icon = Icons.Rounded.History,
+            )
+        }
+        if (total == 0) {
+            item { com.rajdeep.listen.ui.components.EmptyState(Icons.Rounded.History, "Nothing here yet", "Keep listening — your recent songs will appear here.") }
+        }
+        items(songs.size, key = { "local-recent-${songs[it].id}" }) { i ->
+            val song = songs[i]
+            SongRow(song, false, onClick = { vm.player.playSongs(songs, i) }, onMore = { vm.menuSong.value = song })
+        }
+        items(online.size, key = { "online-recent-${online[it].songId}" }) { i ->
+            val item = online[i]
+            val track = com.rajdeep.listen.data.online.OnlineTrack(
+                key = item.songId, title = item.title, artist = item.artist, album = item.album,
+                artwork = item.artwork.takeIf { it.isNotBlank() }, durationMs = 0L, streamUrl = "",
+                isPreview = false, source = item.songId.substringBefore(':').ifBlank { "Online" },
+            )
+            OnlineRow(
+                null, track,
+                onClick = {
+                    vm.playFavorite(com.rajdeep.listen.data.AccountFavorite(item.songId, item.title, item.artist, item.album, item.artwork)) { message ->
+                        android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onFavorite = { vm.toggleOnlineFavorite(track) },
+                isFavorite = onlineFavorites.any { it.songId == item.songId },
+                showBadge = false,
+            )
+        }
+    }
 }
 
 @Composable

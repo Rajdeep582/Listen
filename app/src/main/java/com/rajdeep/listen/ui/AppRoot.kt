@@ -160,9 +160,18 @@ private fun AppContent(vm: AppViewModel, activity: MainActivity, startMode: Mode
     val navApi = remember(nav) { Nav(nav) }
     var mode by rememberSaveable { mutableStateOf(startMode) }
     var expanded by rememberSaveable { mutableStateOf(false) }
+    var dismissedMiniTrack by rememberSaveable { mutableStateOf<String?>(null) }
     val playerState by vm.player.state.collectAsStateWithLifecycle()
     val openSignal by activity.openPlayerSignal.collectAsStateWithLifecycle()
-    LaunchedEffect(openSignal) { if (openSignal > 0 && playerState.current != null) expanded = true }
+    LaunchedEffect(openSignal) {
+        if (openSignal > 0 && playerState.current != null) {
+            dismissedMiniTrack = null
+            expanded = true
+        }
+    }
+    LaunchedEffect(playerState.current?.mediaId) {
+        if (playerState.current?.mediaId != dismissedMiniTrack) dismissedMiniTrack = null
+    }
 
     // `toggleMode` moves instantly (pill animates on its own); `mode` (theme + navigation) follows a
     // beat later so the heavy screen swap never competes with the toggle animation for frames.
@@ -221,7 +230,7 @@ private fun AppContent(vm: AppViewModel, activity: MainActivity, startMode: Mode
     }
 
     val hasMini = playerState.current != null
-    val showMini = hasMini && mode == Mode.MUSIC && toggleMode == Mode.MUSIC
+    val showMini = hasMini && mode == Mode.MUSIC && toggleMode == Mode.MUSIC && dismissedMiniTrack != playerState.current?.mediaId
     val navBarInset = WindowInsets.navigationBars
     val bottomInset: Dp = (if (showMini) 72.dp else 0.dp) + 68.dp + 12.dp
 
@@ -246,7 +255,7 @@ private fun AppContent(vm: AppViewModel, activity: MainActivity, startMode: Mode
 
             CompositionLocalProvider(LocalBottomInset provides bottomInset) {
                 Column(Modifier.fillMaxSize()) {
-                    TopBar(toggleMode, ::switchMode, onSettings = navApi::settings, onAccount = navApi::profile, showAccount = accountUser != null)
+                    TopBar(toggleMode, ::switchMode, onSettings = navApi::settings, onAccount = navApi::profile)
                     NavHost(
                         navController = nav, startDestination = if (startMode == Mode.VIDEO) "video" else if (accountUser == null) "auth" else "music", modifier = Modifier.weight(1f),
                         // Weighted, slightly slow motion (M3 "emphasized" curve): content settles in rather than snapping.
@@ -285,7 +294,7 @@ private fun AppContent(vm: AppViewModel, activity: MainActivity, startMode: Mode
                             if (accountUser == null) AccountScreen(vm, onAuthenticated = {
                                 nav.navigate("music") { launchSingleTop = true }
                             }, onSignOut = {})
-                            else ProfileScreen(vm, accountUser, onSignOut = {
+                            else ProfileScreen(accountUser, onFavorites = { navApi.list("favourites") }, onSettings = navApi::settings, onSignOut = {
                                 vm.signOut(); nav.navigate("auth") { popUpTo(nav.graph.id) { inclusive = false }; launchSingleTop = true }
                             })
                         }
@@ -297,7 +306,12 @@ private fun AppContent(vm: AppViewModel, activity: MainActivity, startMode: Mode
             // bottom chrome
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
                 AnimatedVisibility(showMini, enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
-                    MiniPlayer(vm.player, playerState, onExpand = { expanded = true }, modifier = Modifier.padding(horizontal = 10.dp))
+                    MiniPlayer(
+                        vm.player, playerState,
+                        onExpand = { expanded = true },
+                        onDismiss = { dismissedMiniTrack = playerState.current?.mediaId },
+                        modifier = Modifier.padding(horizontal = 10.dp),
+                    )
                 }
                 androidx.compose.animation.AnimatedContent(
                     toggleMode, label = "tabs",
@@ -363,22 +377,20 @@ private fun NavGraphBuilder.videoGraph(vm: AppViewModel, nav: Nav, activity: Mai
 }
 
 @Composable
-private fun TopBar(mode: Mode, onMode: (Mode) -> Unit, onSettings: () -> Unit, onAccount: () -> Unit, showAccount: Boolean) {
+private fun TopBar(mode: Mode, onMode: (Mode) -> Unit, onSettings: () -> Unit, onAccount: () -> Unit) {
     Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 20.dp, end = 8.dp, top = 6.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("listen", style = MaterialTheme.typography.headlineMedium, color = Palette.Text)
         Box(Modifier.size(6.dp).offset(x = 2.dp, y = 6.dp).clip(CircleShape).background(LocalAccent.current.primary))
         Spacer(Modifier.weight(1f))
         ModeToggle(mode, onMode)
         Spacer(Modifier.width(4.dp))
-        if (mode == Mode.MUSIC && showAccount) {
-            IconButton(
-                onClick = onAccount,
-                modifier = Modifier.size(44.dp).clip(CircleShape).background(Palette.SurfaceHigh),
-            ) {
-                Icon(Icons.Rounded.AccountCircle, "Profile", tint = LocalAccent.current.primary, modifier = Modifier.size(28.dp))
+        if (mode == Mode.MUSIC) {
+            IconButton(onClick = onAccount) {
+                Icon(Icons.Rounded.AccountCircle, "Profile", tint = LocalAccent.current.primary, modifier = Modifier.size(26.dp))
             }
+        } else {
+            IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "Settings", tint = Palette.TextDim) }
         }
-        IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "Settings", tint = Palette.TextDim) }
     }
 }
 
@@ -465,10 +477,18 @@ private fun BottomNav(tabs: List<Tab>, nav: NavHostController) {
                 Column(
                     Modifier.weight(1f).clickable(remember { MutableInteractionSource() }, null) {
                         if (selected) return@clickable
-                        nav.navigate(t.route) {
-                            val parent = entry?.destination?.parent
-                            popUpTo(if (parent != null && parent.id != nav.graph.id) parent.findStartDestination().id else nav.graph.id) { saveState = true }
-                            launchSingleTop = true; restoreState = true
+                            if (t.route == "home") {
+                                // A saved detail stack can otherwise be restored beneath Home.
+                                nav.navigate("music") {
+                                    popUpTo(nav.graph.id) { saveState = false }
+                                    launchSingleTop = true; restoreState = false
+                                }
+                            } else {
+                                nav.navigate(t.route) {
+                                    val parent = entry?.destination?.parent
+                                    popUpTo(if (parent != null && parent.id != nav.graph.id) parent.findStartDestination().id else nav.graph.id) { saveState = true }
+                                    launchSingleTop = true; restoreState = true
+                                }
                         }
                     },
                     horizontalAlignment = Alignment.CenterHorizontally,

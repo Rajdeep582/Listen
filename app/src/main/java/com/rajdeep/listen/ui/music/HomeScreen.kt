@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.rajdeep.listen.data.db.Song
@@ -80,18 +81,20 @@ fun HomeScreen(vm: AppViewModel, nav: Nav) {
     val playlists by vm.playlists.collectAsStateWithLifecycle()
     val favs by vm.favourites.collectAsStateWithLifecycle()
     val onlineFavorites by vm.onlineFavorites.collectAsStateWithLifecycle()
+    val onlineHistory by vm.onlineHistory.collectAsStateWithLifecycle()
     val rediscover by vm.rediscover.collectAsStateWithLifecycle()
     val discover by vm.discover.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val trending by vm.trending.collectAsStateWithLifecycle()
     val scanning by vm.scanning.collectAsStateWithLifecycle()
     val player = vm.player
+    val context = LocalContext.current
 
     LaunchedEffect(songs?.size) { if (!songs.isNullOrEmpty()) vm.refreshMixes() }
     LaunchedEffect(settings.onlineEnabled) { if (settings.onlineEnabled) vm.loadTrending() }
 
     val bottom = LocalBottomInset.current
-    if (songs?.isEmpty() == true) {
+    if (songs?.isEmpty() == true && onlineHistory.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             EmptyState(
                 Icons.Rounded.LibraryMusic, if (scanning) "Scanning your music…" else "No music found",
@@ -112,7 +115,7 @@ fun HomeScreen(vm: AppViewModel, nav: Nav) {
         item(key = "tiles") {
             val tiles = buildList {
                 add(Tile("Favourites", Icons.Rounded.Favorite, "fav", (favs?.size ?: 0) + onlineFavorites.size) { nav.list("favourites") })
-                add(Tile("Recently played", Icons.Rounded.History, "recent", recent?.size ?: 0) { nav.list("recent") })
+                add(Tile("Recently played", Icons.Rounded.History, "recent", (recent?.size ?: 0) + onlineHistory.size) { nav.list("recent") })
                 add(Tile("On repeat", Icons.Rounded.Whatshot, "most", most?.size ?: 0) { nav.list("most") })
                 add(Tile("Fresh adds", Icons.Rounded.NewReleases, "added", added?.size ?: 0) { nav.list("added") })
                 playlists.orEmpty().take(2).forEach { p -> add(Tile(p.name, null, "pl${p.id}", p.songCount, p.coverAlbumId?.let(::albumArtUri)) { nav.playlist(p.id) }) }
@@ -124,14 +127,6 @@ fun HomeScreen(vm: AppViewModel, nav: Nav) {
                         if (row.size == 1) Spacer(Modifier.weight(1f))
                     }
                 }
-            }
-        }
-        // Continue listening
-        val cont = recent.orEmpty()
-        if (cont.isNotEmpty()) {
-            item(key = "cont") {
-                SectionHeader("Continue listening", "Jump back in")
-                SongCards(cont.take(15), onPlay = { i -> player.playSongs(cont, i) }, onLong = { vm.menuSong.value = it })
             }
         }
         // Mixes generated from listening data
@@ -189,6 +184,30 @@ fun HomeScreen(vm: AppViewModel, nav: Nav) {
                     is Remote.Failed -> OfflineNote(t.message) { vm.loadTrending(force = true) }
                     Remote.Loading -> Text("Loading…", color = Palette.TextDim, modifier = Modifier.padding(horizontal = 20.dp))
                 }
+            }
+        }
+        val cont = recent.orEmpty()
+        if (cont.isNotEmpty() || onlineHistory.isNotEmpty()) {
+            item(key = "recently-played-header") {
+                SectionHeader("Recently played", "Pick up where you left off", action = "See all", onAction = { nav.list("recent") })
+            }
+            if (cont.isNotEmpty()) item(key = "recently-played-local") {
+                SongCards(cont.take(15), onPlay = { i -> player.playSongs(cont, i) }, onLong = { vm.menuSong.value = it })
+            }
+            items(onlineHistory.take(15), key = { "recently-played-${it.songId}" }) { historyItem ->
+                val track = com.rajdeep.listen.data.online.OnlineTrack(
+                    key = historyItem.songId, title = historyItem.title, artist = historyItem.artist, album = historyItem.album,
+                    artwork = historyItem.artwork.takeIf { it.isNotBlank() }, durationMs = 0L, streamUrl = "",
+                    isPreview = false, source = historyItem.songId.substringBefore(':').ifBlank { "Online" },
+                )
+                OnlineRow(
+                    null, track,
+                    onClick = { vm.playFavorite(com.rajdeep.listen.data.AccountFavorite(historyItem.songId, historyItem.title, historyItem.artist, historyItem.album, historyItem.artwork)) { message ->
+                        android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+                    } },
+                    onFavorite = { vm.toggleOnlineFavorite(track) },
+                    isFavorite = onlineFavorites.any { it.songId == historyItem.songId }, showBadge = false,
+                )
             }
         }
         item { Spacer(Modifier.height(24.dp)) }

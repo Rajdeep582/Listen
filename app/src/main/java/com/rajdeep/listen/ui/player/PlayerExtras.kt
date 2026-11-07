@@ -60,7 +60,6 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -92,9 +91,10 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun LyricsPane(vm: AppViewModel, np: NowPlaying) {
-    val lyrics by produceState<Lyrics?>(null, np.mediaId) {
-        value = null
-        value = vm.library.lyrics(np.mediaId, np.title, np.artist, np.album, if (np.durationHint > 0) np.durationHint else vm.player.state.value.duration)
+    var lyrics by remember(np.mediaId) { mutableStateOf<Lyrics?>(null) }
+    LaunchedEffect(np.mediaId) {
+        lyrics = null
+        lyrics = vm.library.lyrics(np.mediaId, np.title, np.artist, np.album, if (np.durationHint > 0) np.durationHint else vm.player.state.value.duration)
     }
     Box(Modifier.fillMaxSize().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
         when (val l = lyrics) {

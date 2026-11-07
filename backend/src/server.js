@@ -113,7 +113,11 @@ app.put('/v1/preferences', auth, asyncRoute(async (req, res) => {
   await preferences.updateOne({ userId: userId(req) }, { $set: { values, updatedAt: new Date() } }, { upsert: true });
   res.status(204).end();
 }));
-app.use((err, _req, res, _next) => { console.error('Request failed:', err.message); res.status(500).json({ error: 'Service error. Please try again.' }); });
+app.use((err, _req, res, _next) => {
+  if (err?.type === 'entity.parse.failed') return fail(res, 400, 'Invalid JSON request body.');
+  console.error('Request failed:', err.name || 'Error');
+  res.status(500).json({ error: 'Service error. Please try again.' });
+});
 const port = Number(process.env.PORT || 8080);
 app.listen(port, '0.0.0.0', () => console.log(`Listen API listening on ${port}; database listen_app`));
 process.on('SIGTERM', async () => { await client.close(); process.exit(0); });
