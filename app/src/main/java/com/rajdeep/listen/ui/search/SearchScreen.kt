@@ -105,6 +105,7 @@ fun SearchScreen(vm: AppViewModel, nav: Nav, mode: Mode) {
     val history = remember { SearchHistory(ctx) }
     val modeKey = mode.name
     var query by rememberSaveable { mutableStateOf("") }
+    var searchSubmitted by rememberSaveable { mutableStateOf(false) }
     var recents by remember { mutableStateOf(history.get(modeKey)) }
     var local by remember { mutableStateOf(SearchResults()) }
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -133,6 +134,8 @@ fun SearchScreen(vm: AppViewModel, nav: Nav, mode: Mode) {
     fun runQuery(q: String) {
         val raw = q.trim()
         if (raw.isEmpty()) return
+        searchSubmitted = true
+        scope.launch { listState.scrollToItem(0) }
         commit(raw)
         keyboard?.hide()
         focusManager.clearFocus()
@@ -209,10 +212,10 @@ fun SearchScreen(vm: AppViewModel, nav: Nav, mode: Mode) {
 
     Column(Modifier.fillMaxSize()) {
         TextField(
-            value = query, onValueChange = { query = it }, singleLine = true,
+            value = query, onValueChange = { query = it; searchSubmitted = false }, singleLine = true,
             placeholder = { Text(if (mode == Mode.MUSIC) "Songs, artists, albums, radio" else "Videos, folders", color = Palette.TextFaint) },
             leadingIcon = { Icon(Icons.Rounded.Search, null, tint = Palette.TextDim) },
-            trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = ""; runCatching { focus.requestFocus() } }) { Icon(Icons.Rounded.Close, "Clear", tint = Palette.TextDim) } },
+            trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = ""; searchSubmitted = false; runCatching { focus.requestFocus() } }) { Icon(Icons.Rounded.Close, "Clear", tint = Palette.TextDim) } },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { runQuery(query) }),
             colors = TextFieldDefaults.colors(
@@ -269,7 +272,7 @@ fun SearchScreen(vm: AppViewModel, nav: Nav, mode: Mode) {
                 return@LazyColumn
             }
             // ---------- suggestions ----------
-            if (source == "All") {
+            if (source == "All" && !searchSubmitted) {
                 // local matches → AI picks → web completions; de-duplicated, max 8
                 val seen = HashSet<String>()
                 val merged = (suggestions.map { it to 0 } + aiSuggest.map { it to 1 } + webSuggest.map { it to 2 })
@@ -277,7 +280,7 @@ fun SearchScreen(vm: AppViewModel, nav: Nav, mode: Mode) {
                 items(merged, key = { "sug${it.second}${it.first}" }) { (sg, kind) ->
                     QueryRow(
                         when (kind) { 1 -> Icons.Rounded.AutoAwesome; 2 -> Icons.Rounded.Search; else -> Icons.AutoMirrored.Rounded.TrendingUp },
-                        sg, onClick = { runQuery(sg) }, onFill = { query = "$sg " },
+                        sg, onClick = { runQuery(sg) }, onFill = { query = "$sg "; searchSubmitted = false },
                     )
                 }
             }

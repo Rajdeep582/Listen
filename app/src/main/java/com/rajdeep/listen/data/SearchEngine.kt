@@ -90,7 +90,10 @@ object SearchEngine {
         val scored = all.map { t ->
             val s = score(q, listOf(t.title to 4, t.artist to 3, t.album to 1)).let { if (it == 0) 1 else it } // APIs already matched; keep but rank low
             t to s + (if (t.isPreview) 0 else 40) + (if (t.artwork != null) 5 else 0)
-        }.sortedByDescending { it.second }
+        }.sortedWith(
+            compareByDescending<Pair<OnlineTrack, Int>> { it.first.source == "JioSaavn" }
+                .thenByDescending { it.second },
+        )
         val seen = HashSet<String>()
         return scored.mapNotNull { (t, _) ->
             val k = norm(t.title).take(28) + "|" + norm(t.artist).take(16)
