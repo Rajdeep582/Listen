@@ -100,6 +100,7 @@ private val onlineCache = object : LinkedHashMap<String, OnlineBundle>(32, 0.75f
 
 @Composable
 fun SearchScreen(vm: AppViewModel, nav: Nav, mode: Mode) {
+    val onlineFavorites by vm.onlineFavorites.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     val history = remember { SearchHistory(ctx) }
     val modeKey = mode.name
@@ -307,11 +308,19 @@ fun SearchScreen(vm: AppViewModel, nav: Nav, mode: Mode) {
                     val s = localSongs[i]
                     SongRow(s, s.id == state.current?.localId, onClick = { commit(); vm.player.playSongs(localSongs, i) }, onMore = { vm.menuSong.value = s })
                 }
-                items(on.size, key = { "o" + on[it].key }) { i -> OnlineRow(null, on[i]) { commit(); vm.player.playOnline(on, i) } }
+                items(on.size, key = { "o" + on[it].key }) { i ->
+                    val track = on[i]
+                    OnlineRow(null, track, { commit(); vm.player.playOnline(on, i) },
+                        onFavorite = { vm.toggleOnlineFavorite(track) }, isFavorite = onlineFavorites.any { it.songId == track.key })
+                }
                 val st = b?.stations.orEmpty()
                 if (show("Radio") && st.isNotEmpty()) {
                     item(key = "radH") { SectionHeader("Radio stations", "Live") }
-                    items(st.size, key = { "r" + st[it].key }) { i -> OnlineRow(null, st[i]) { commit(); vm.player.playOnline(listOf(st[i]), 0) } }
+                    items(st.size, key = { "r" + st[it].key }) { i ->
+                        val track = st[i]
+                        OnlineRow(null, track, { commit(); vm.player.playOnline(listOf(track), 0) },
+                            onFavorite = { vm.toggleOnlineFavorite(track) }, isFavorite = onlineFavorites.any { it.songId == track.key })
+                    }
                 }
                 val ar = b?.archive.orEmpty()
                 if (show("Archive") && ar.isNotEmpty()) {

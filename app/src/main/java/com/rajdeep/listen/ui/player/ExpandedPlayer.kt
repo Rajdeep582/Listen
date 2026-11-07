@@ -139,6 +139,7 @@ fun ExpandedPlayer(
     // stable flow per track (no conditional remember → no slot-table mismatch when switching local ↔ online)
     val songFlow = remember(np.localId) { np.localId?.let { vm.library.dao.songFlow(it) } ?: kotlinx.coroutines.flow.flowOf(null) }
     val song by songFlow.collectAsStateWithLifecycle(null)
+    val onlineFavorites by vm.onlineFavorites.collectAsStateWithLifecycle()
     var trackMenu by remember { mutableStateOf(false) }
 
     // Ambient motion: a slow drifting glow behind everything.
@@ -210,6 +211,13 @@ fun ExpandedPlayer(
                     val s by animateFloatAsState(if (fav) 1.15f else 1f, spring(dampingRatio = 0.4f), label = "fav")
                     IconButton(onClick = player::toggleFavoriteCurrent) {
                         Icon(if (fav) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder, "Favourite", tint = if (fav) accent.primary else Palette.Text, modifier = Modifier.size(28.dp).graphicsLayer { scaleX = s; scaleY = s })
+                    }
+                } else if (!np.isLive) {
+                    val fav = onlineFavorites.any { it.songId == np.mediaId }
+                    IconButton(onClick = {
+                        vm.toggleOnlineFavorite(np.mediaId, np.title, np.artist, np.album, np.artwork?.toString().orEmpty())
+                    }) {
+                        Icon(if (fav) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder, "Favourite", tint = if (fav) accent.primary else Palette.Text, modifier = Modifier.size(28.dp))
                     }
                 }
             }

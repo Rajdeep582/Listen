@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import com.rajdeep.listen.data.AccountUser
+import com.rajdeep.listen.data.AccountFavorite
 
 sealed interface Remote<out T> {
     data object Loading : Remote<Nothing>
@@ -38,6 +39,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val accountUser: StateFlow<AccountUser?> = _accountUser.asStateFlow()
     private val _accountReady = MutableStateFlow(false)
     val accountReady: StateFlow<Boolean> = _accountReady.asStateFlow()
+    private val _onlineFavorites = MutableStateFlow(c.account.user?.id?.let(c.account::pendingFavoriteAdds).orEmpty())
+    val onlineFavorites: StateFlow<List<AccountFavorite>> = _onlineFavorites.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -72,6 +75,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun signOut() {
         c.account.signOut(); _accountUser.value = null
+        _onlineFavorites.value = emptyList()
         viewModelScope.launch { c.library.dao.replaceFavorites(emptyList()) }
     }
     private suspend fun syncCloudFavorites() {
@@ -85,6 +89,41 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         c.library.dao.replaceFavorites(ids)
+        _onlineFavorites.value = buildList {
+            repeat(records.length()) { i ->
+                val item = records.optJSONObject(i) ?: return@repeat
+                val id = item.optString("songId")
+                if (id.isNotBlank() && !id.startsWith("local:")) add(
+                    AccountFavorite(id, item.optString("title"), item.optString("artist"), item.optString("album"), item.optString("artwork")),
+                )
+            }
+        }
+    }
+
+    fun isOnlineFavorite(songId: String) = _onlineFavorites.value.any { it.songId == songId }
+
+    fun toggleOnlineFavorite(songId: String, title: String, artist: String, album: String = "", artwork: String = ""): Boolean {
+        val ownerId = _accountUser.value?.id ?: return false
+        val existing = _onlineFavorites.value.firstOrNull { it.songId == songId }
+        val saved = AccountFavorite(songId, title, artist, album, artwork)
+        val add = existing == null
+        _onlineFavorites.value = if (add) listOf(saved) + _onlineFavorites.value else _onlineFavorites.value.filterNot { it.songId == songId }
+        viewModelScope.launch { c.account.syncFavorite(ownerId, songId, add, title, artist, album, artwork) }
+        return true
+    }
+
+    fun toggleOnlineFavorite(track: OnlineTrack): Boolean = toggleOnlineFavorite(
+        track.key, track.title, track.artist, track.album, track.artwork.orEmpty(),
+    )
+
+    fun playFavorite(favorite: AccountFavorite, onError: (String) -> Unit) = viewModelScope.launch {
+        val query = "${favorite.title} ${favorite.artist}".trim()
+        val match = runCatching {
+            val results = com.rajdeep.listen.data.online.OnlineCatalog.search(query).filterNot { it.isLive }
+            results.firstOrNull { it.key == favorite.songId }
+        }.getOrNull()
+        if (match == null) onError("Couldn't find a playable stream for this favourite.")
+        else player.playOnline(listOf(match), 0)
     }
     fun recordSearch(query: String) = viewModelScope.launch { if (c.account.token != null) runCatching { c.account.recordSearch(query) } }
     suspend fun cloudFavorites() = runCatching { c.account.favorites() }.getOrNull()

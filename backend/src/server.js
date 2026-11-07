@@ -57,7 +57,7 @@ app.post('/v1/auth/signup', asyncRoute(async (req, res) => {
   const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
   const password = req.body?.password;
   if (!/^[A-Za-z0-9_]{3,24}$/.test(username)) return fail(res, 400, 'Username must be 3–24 letters, numbers, or underscores.');
-  if (typeof password !== 'string' || password.length < 10 || password.length > 128) return fail(res, 400, 'Password must be 10–128 characters.');
+  if (typeof password !== 'string' || password.length < 6 || password.length > 128) return fail(res, 400, 'Password must be 6–128 characters.');
   const now = new Date();
   try {
     const doc = { username, usernameKey: username.toLowerCase(), passwordHash: await bcrypt.hash(password, 12), createdAt: now, lastLoginAt: now, profile: {} };

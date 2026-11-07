@@ -20,6 +20,7 @@ import java.net.URL
 
 data class AccountUser(val id: String, val username: String, val createdAt: String = "", val lastLoginAt: String = "")
 data class AccountSession(val token: String, val user: AccountUser)
+data class AccountFavorite(val songId: String, val title: String, val artist: String, val album: String, val artwork: String)
 private class ApiStatusException(val status: Int, message: String) : IllegalStateException(message)
 
 /** All account traffic goes over HTTPS to the API; Mongo credentials never enter the client. */
@@ -103,6 +104,14 @@ class AccountClient(context: Context) {
         withContext(Dispatchers.IO) { perform("POST", "v1/history", song(songId, title, artist, album, artwork)) }
     suspend fun recordSearch(query: String) = withContext(Dispatchers.IO) { perform("POST", "v1/searches", JSONObject().put("query", query)) }
     suspend fun favorites(): JSONArray = withContext(Dispatchers.IO) { requestArray("GET", "v1/favorites") }
+    fun pendingFavoriteAdds(ownerId: String): List<AccountFavorite> {
+        val queued = runCatching { JSONObject(prefs.getString("pending_favorites_$ownerId", "{}") ?: "{}") }.getOrDefault(JSONObject())
+        return queued.keys().asSequence().toList().mapNotNull { id ->
+            val entry = queued.optJSONObject(id) ?: return@mapNotNull null
+            if (!entry.optBoolean("favorite") || id.startsWith("local:")) return@mapNotNull null
+            AccountFavorite(id, entry.optString("title"), entry.optString("artist"), entry.optString("album"), entry.optString("artwork"))
+        }
+    }
     suspend fun history(): JSONArray = withContext(Dispatchers.IO) { requestArray("GET", "v1/history") }
     suspend fun preferences(): JSONObject = withContext(Dispatchers.IO) { request("GET", "v1/preferences") }
     suspend fun savePreferences(values: JSONObject) = withContext(Dispatchers.IO) { perform("PUT", "v1/preferences", values) }
@@ -123,7 +132,8 @@ class AccountClient(context: Context) {
         val connection = URL(URL(base), path).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = method
-            connection.connectTimeout = 12_000; connection.readTimeout = 12_000
+            // Render's free service can need close to a minute to wake after idle time.
+            connection.connectTimeout = 20_000; connection.readTimeout = 90_000
             connection.setRequestProperty("Accept", "application/json")
             if (authenticated) token?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
             if (body != null) {

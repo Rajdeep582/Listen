@@ -79,6 +79,7 @@ fun HomeScreen(vm: AppViewModel, nav: Nav) {
     val albums by vm.albums.collectAsStateWithLifecycle()
     val playlists by vm.playlists.collectAsStateWithLifecycle()
     val favs by vm.favourites.collectAsStateWithLifecycle()
+    val onlineFavorites by vm.onlineFavorites.collectAsStateWithLifecycle()
     val rediscover by vm.rediscover.collectAsStateWithLifecycle()
     val discover by vm.discover.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -110,7 +111,7 @@ fun HomeScreen(vm: AppViewModel, nav: Nav) {
         // Quick tiles
         item(key = "tiles") {
             val tiles = buildList {
-                add(Tile("Favourites", Icons.Rounded.Favorite, "fav", favs?.size ?: 0) { nav.list("favourites") })
+                add(Tile("Favourites", Icons.Rounded.Favorite, "fav", (favs?.size ?: 0) + onlineFavorites.size) { nav.list("favourites") })
                 add(Tile("Recently played", Icons.Rounded.History, "recent", recent?.size ?: 0) { nav.list("recent") })
                 add(Tile("On repeat", Icons.Rounded.Whatshot, "most", most?.size ?: 0) { nav.list("most") })
                 add(Tile("Fresh adds", Icons.Rounded.NewReleases, "added", added?.size ?: 0) { nav.list("added") })
@@ -123,26 +124,6 @@ fun HomeScreen(vm: AppViewModel, nav: Nav) {
                         if (row.size == 1) Spacer(Modifier.weight(1f))
                     }
                 }
-            }
-        }
-        // Favourites (hearted songs)
-        item(key = "favs") {
-            val favList = favs.orEmpty()
-            SectionHeader(
-                "Favourites",
-                "Songs you love",
-                action = if (favList.isNotEmpty()) "See all" else null,
-                onAction = if (favList.isNotEmpty()) { { nav.list("favourites") } } else null,
-            )
-            if (favList.isNotEmpty()) {
-                SongCards(favList.take(15), onPlay = { i -> player.playSongs(favList, i) }, onLong = { vm.menuSong.value = it })
-            } else {
-                Text(
-                    "Tap the heart (♥) on any song to add it here.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Palette.TextDim,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
-                )
             }
         }
         // Continue listening
@@ -199,7 +180,11 @@ fun HomeScreen(vm: AppViewModel, nav: Nav) {
                 SectionHeader("Trending on Audius", "Online · free full tracks", action = "Explore", onAction = { nav.controller.navigate("explore") })
                 when (val t = trending) {
                     is Remote.Ready -> CardRow(t.data.take(16), key = { it.key }) { tr ->
-                        MediaCard(tr.title, tr.artist, tr.artwork, tr.key, onClick = { player.playOnline(t.data, t.data.indexOf(tr)) }, badge = "Online")
+                        MediaCard(
+                            tr.title, tr.artist, tr.artwork, tr.key,
+                            onClick = { player.playOnline(t.data, t.data.indexOf(tr)) }, badge = "Online",
+                            isFavorite = onlineFavorites.any { it.songId == tr.key }, onFavoriteClick = { vm.toggleOnlineFavorite(tr) },
+                        )
                     }
                     is Remote.Failed -> OfflineNote(t.message) { vm.loadTrending(force = true) }
                     Remote.Loading -> Text("Loading…", color = Palette.TextDim, modifier = Modifier.padding(horizontal = 20.dp))
@@ -270,7 +255,7 @@ fun SongCards(songs: List<Song>, onPlay: (Int) -> Unit, onLong: (Song) -> Unit) 
                 width = 136.dp,
                 onLongClick = { onLong(s) },
                 isFavorite = s.isFavorite,
-                onFavoriteClick = { app.container.library.toggleFavorite(s.id) },
+                onFavoriteClick = { app.container.library.toggleFavorite(s.id).let { true } },
             )
         }
     }

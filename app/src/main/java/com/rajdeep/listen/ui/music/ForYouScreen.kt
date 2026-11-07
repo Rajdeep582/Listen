@@ -54,6 +54,7 @@ private fun AppViewModel.play(list: List<Suggestion>, at: Suggestion) {
 @Composable
 fun ForYouSection(vm: AppViewModel, nav: Nav) {
     val state by vm.forYou.collectAsStateWithLifecycle()
+    val onlineFavorites by vm.onlineFavorites.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.loadForYou() }
     val sub = if (com.rajdeep.listen.data.online.AiClient.fast) "AI · from your listening" else "From your listening"
     SectionHeader("Suggested for you", sub, action = "Open", onAction = { nav.controller.navigate("foryou") })
@@ -66,7 +67,8 @@ fun ForYouSection(vm: AppViewModel, nav: Nav) {
                     is Suggestion.Local -> MediaCard(sg.song.title, sg.song.artist, songArt(sg.song), sg.song.album, lookup = songLookup(sg.song), onClick = { vm.play(s.data, sg) }, width = 136.dp, badge = "Yours")
                     is Suggestion.Online -> MediaCard(sg.track.title, sg.track.artist, sg.track.artwork, sg.track.key, onClick = { vm.play(s.data, sg) }, width = 136.dp,
                         badge = if (sg.track.isPreview) "Preview" else sg.track.source,
-                        lookup = com.rajdeep.listen.ui.components.songTrackLookup(sg.track.artist, sg.track.title))
+                        lookup = com.rajdeep.listen.ui.components.songTrackLookup(sg.track.artist, sg.track.title),
+                        isFavorite = onlineFavorites.any { it.songId == sg.track.key }, onFavoriteClick = { vm.toggleOnlineFavorite(sg.track) })
                 }
             }
         }
@@ -76,6 +78,7 @@ fun ForYouSection(vm: AppViewModel, nav: Nav) {
 @Composable
 fun ForYouScreen(vm: AppViewModel, nav: Nav) {
     val state by vm.forYou.collectAsStateWithLifecycle()
+    val onlineFavorites by vm.onlineFavorites.collectAsStateWithLifecycle()
     val player by vm.player.state.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.loadForYou() }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = LocalBottomInset.current)) {
@@ -110,7 +113,8 @@ fun ForYouScreen(vm: AppViewModel, nav: Nav) {
                     items(list.size, key = { "s$reason$it" }) { i ->
                         when (val sg = list[i]) {
                             is Suggestion.Local -> SongRow(sg.song, sg.song.id == player.current?.localId, onClick = { vm.play(s.data, sg) }, onMore = { vm.menuSong.value = sg.song })
-                            is Suggestion.Online -> OnlineRow(null, sg.track) { vm.play(s.data, sg) }
+                            is Suggestion.Online -> OnlineRow(null, sg.track, { vm.play(s.data, sg) },
+                                onFavorite = { vm.toggleOnlineFavorite(sg.track) }, isFavorite = onlineFavorites.any { it.songId == sg.track.key })
                         }
                     }
                 }

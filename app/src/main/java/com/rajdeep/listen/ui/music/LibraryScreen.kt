@@ -93,7 +93,7 @@ fun LibraryScreen(vm: AppViewModel, nav: Nav) {
             LibTab.ARTISTS -> ArtistsList(vm, nav)
             LibTab.PLAYLISTS -> PlaylistsList(vm, nav)
             LibTab.FOLDERS -> FoldersList(vm, nav)
-            LibTab.FAVOURITES -> { val f by vm.favourites.collectAsStateWithLifecycle(); SongsColumn(vm, f, "No favourites yet", "Tap ♥ in the player to save songs here.") }
+            LibTab.FAVOURITES -> FavouritesScreen(vm, nav)
             LibTab.RECENT -> { val r by vm.recentlyPlayed.collectAsStateWithLifecycle(); SongsColumn(vm, r, "Nothing played yet", "Your listening history shows up here.", sortable = false) }
         }
     }

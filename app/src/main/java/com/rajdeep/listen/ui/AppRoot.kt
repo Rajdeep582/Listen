@@ -370,7 +370,14 @@ private fun TopBar(mode: Mode, onMode: (Mode) -> Unit, onSettings: () -> Unit, o
         Spacer(Modifier.weight(1f))
         ModeToggle(mode, onMode)
         Spacer(Modifier.width(4.dp))
-        if (mode == Mode.MUSIC && showAccount) IconButton(onClick = onAccount) { Icon(Icons.Rounded.AccountCircle, "Profile", tint = Palette.TextDim) }
+        if (mode == Mode.MUSIC && showAccount) {
+            IconButton(
+                onClick = onAccount,
+                modifier = Modifier.size(44.dp).clip(CircleShape).background(Palette.SurfaceHigh),
+            ) {
+                Icon(Icons.Rounded.AccountCircle, "Profile", tint = LocalAccent.current.primary, modifier = Modifier.size(28.dp))
+            }
+        }
         IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "Settings", tint = Palette.TextDim) }
     }
 }

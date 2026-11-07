@@ -10,12 +10,14 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,6 +26,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -45,6 +48,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import com.rajdeep.listen.data.db.Song
 import com.rajdeep.listen.ui.components.albumArt as albumArtUri
 import com.rajdeep.listen.ui.AppViewModel
@@ -52,6 +56,8 @@ import com.rajdeep.listen.ui.Nav
 import com.rajdeep.listen.ui.components.Artwork
 import com.rajdeep.listen.ui.components.MediaCard
 import com.rajdeep.listen.ui.components.SectionHeader
+import com.rajdeep.listen.ui.components.SongRow
+import com.rajdeep.listen.ui.LocalBottomInset
 import com.rajdeep.listen.ui.components.formatDuration
 import com.rajdeep.listen.ui.player.rememberArtColors
 import com.rajdeep.listen.ui.theme.Palette
@@ -172,8 +178,11 @@ fun FolderSongsScreen(vm: AppViewModel, nav: Nav, folder: String) {
 
 @Composable
 fun SongListScreen(vm: AppViewModel, nav: Nav, kind: String) {
+    if (kind == "favourites") {
+        FavouritesScreen(vm, nav)
+        return
+    }
     val (title, flow) = when (kind) {
-        "favourites" -> "Favourites" to vm.favourites
         "recent" -> "Recently played" to vm.recentlyPlayed
         "most" -> "On repeat" to vm.mostPlayed
         else -> "Recently added" to vm.recentlyAdded
@@ -182,5 +191,44 @@ fun SongListScreen(vm: AppViewModel, nav: Nav, kind: String) {
     SongsColumn(vm, songs, "Nothing here yet", "Keep listening — this fills up automatically.", sortable = kind == "favourites", header = {
         DetailHeader(songs?.firstOrNull()?.let { albumArtUri(it.albumId) }, title, title, "Auto playlist", meta(songs), nav)
     })
+}
+
+@Composable
+fun FavouritesScreen(vm: AppViewModel, nav: Nav) {
+    val context = LocalContext.current
+    val local by vm.favourites.collectAsStateWithLifecycle()
+    val online by vm.onlineFavorites.collectAsStateWithLifecycle()
+    val songs = local.orEmpty()
+    val total = songs.size + online.size
+    LazyColumn(Modifier.fillMaxWidth().fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = LocalBottomInset.current)) {
+        item(key = "favourites-header") {
+            DetailHeader(
+                songs.firstOrNull()?.let { albumArtUri(it.albumId) } ?: online.firstOrNull()?.artwork,
+                "favourites", "Favourites", "Your saved music", "$total songs", nav,
+            )
+        }
+        if (total == 0) {
+            item { com.rajdeep.listen.ui.components.EmptyState(Icons.Rounded.Favorite, "No favourites yet", "Tap the heart on a song to save it here.") }
+        }
+        items(songs.size, key = { "local-favourite-${songs[it].id}" }) { i ->
+            val song = songs[i]
+            SongRow(song, false, onClick = { vm.player.playSongs(songs, i) }, onMore = { vm.menuSong.value = song })
+        }
+        items(online.size, key = { "online-favourite-${online[it].songId}" }) { i ->
+            val favorite = online[i]
+            val track = com.rajdeep.listen.data.online.OnlineTrack(
+                key = favorite.songId, title = favorite.title, artist = favorite.artist, album = favorite.album,
+                artwork = favorite.artwork.takeIf { it.isNotBlank() }, durationMs = 0L, streamUrl = "",
+                isPreview = false, source = favorite.songId.substringBefore(':').ifBlank { "Online" },
+            )
+            OnlineRow(
+                null, track,
+                onClick = { vm.playFavorite(favorite) { message ->
+                    android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+                } },
+                onFavorite = { vm.toggleOnlineFavorite(track) }, isFavorite = true, showBadge = false,
+            )
+        }
+    }
 }
 

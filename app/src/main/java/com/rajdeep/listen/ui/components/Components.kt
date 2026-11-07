@@ -38,6 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -55,6 +56,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
 import coil3.video.videoFrameMillis
@@ -192,6 +194,10 @@ fun SongRow(
     leading: (@Composable () -> Unit)? = null,
 ) {
     val accent = LocalAccent.current.primary
+    var favoriteMessage by remember(song.id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(favoriteMessage) {
+        if (favoriteMessage != null) { delay(1400); favoriteMessage = null }
+    }
     Row(
         modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onMore).padding(horizontal = 16.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -207,11 +213,14 @@ fun SongRow(
             Text(song.title, style = MaterialTheme.typography.titleMedium, color = if (isCurrent) accent else Palette.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (song.isFavorite) { Icon(Icons.Rounded.Favorite, null, tint = accent, modifier = Modifier.size(12.dp)); Spacer(Modifier.width(4.dp)) }
-                Text("${song.artist} · ${formatDuration(song.duration)}", style = MaterialTheme.typography.bodyMedium, color = Palette.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(favoriteMessage ?: "${song.artist} · ${formatDuration(song.duration)}", style = MaterialTheme.typography.bodyMedium, color = if (favoriteMessage != null) accent else Palette.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         val app = LocalContext.current.applicationContext as com.rajdeep.listen.ListenApp
-        IconButton(onClick = { app.container.library.toggleFavorite(song.id) }) {
+        IconButton(onClick = {
+            app.container.library.toggleFavorite(song.id)
+            favoriteMessage = if (song.isFavorite) "Removed from favourites" else "Added to favourites"
+        }) {
             Icon(
                 if (song.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                 if (song.isFavorite) "Remove from favourites" else "Add to favourites",
@@ -257,9 +266,13 @@ fun MediaCard(
     lookup: com.rajdeep.listen.data.online.ArtResolver.Query? = null,
     preferLookup: Boolean = false,
     isFavorite: Boolean? = null,
-    onFavoriteClick: (() -> Unit)? = null,
+    onFavoriteClick: (() -> Boolean)? = null,
 ) {
     val src = remember { MutableInteractionSource() }
+    var favoriteMessage by remember(seed) { mutableStateOf<String?>(null) }
+    LaunchedEffect(favoriteMessage) {
+        if (favoriteMessage != null) { delay(1400); favoriteMessage = null }
+    }
     Column(modifier.width(width).pressScale(src).clickableWith(src, onClick, onLongClick)) {
         Box {
             Artwork(art, seed, Modifier.fillMaxWidth().aspectRatio(1f), if (circle) CircleShape else RoundedCornerShape(16.dp), lookup = lookup, preferLookup = preferLookup)
@@ -276,7 +289,9 @@ fun MediaCard(
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                            onClick = onFavoriteClick
+                        onClick = {
+                            favoriteMessage = if (!onFavoriteClick()) "Sign in to save favourites" else if (isFavorite) "Removed from favourites" else "Added to favourites"
+                        }
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -291,7 +306,7 @@ fun MediaCard(
         }
         Spacer(Modifier.height(10.dp))
         Text(title, style = MaterialTheme.typography.titleSmall, color = Palette.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Palette.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(favoriteMessage ?: subtitle, style = MaterialTheme.typography.bodySmall, color = if (favoriteMessage != null) LocalAccent.current.primary else Palette.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

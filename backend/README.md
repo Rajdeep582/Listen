@@ -4,7 +4,7 @@ The Android app talks to this service; Atlas credentials must stay on the server
 
 ## Run the service
 
-1. Install Node.js 20 or later and run `npm install` in this directory.
+1. Install Node.js 22.x and run `npm install` in this directory.
 2. Copy `.env.example` to `.env`, then set `MONGODB_URI` and a random `JWT_SECRET` of at least 32 characters. Keep `.env` private; it is ignored by Git.
 3. Run `npm start`.
 4. Deploy behind an HTTPS endpoint before connecting a release Android build.
@@ -20,3 +20,5 @@ Set `ACCOUNT_API_BASE_URL` in the root `secrets.properties` to the deployed base
 - `GET /v1/preferences`, `PUT /v1/preferences`
 
 All account routes except signup/signin require a bearer token. Passwords are hashed with bcrypt before storage. User-owned records include the authenticated MongoDB user ID and are indexed so accounts cannot see one another's data.
+
+Signup accepts passwords from 6 to 128 characters and usernames from 3 to 24 letters, numbers, or underscores.
