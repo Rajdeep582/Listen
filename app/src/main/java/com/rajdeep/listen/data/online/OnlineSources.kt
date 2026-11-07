@@ -27,6 +27,7 @@
  *  [API-14] FreeToUse    https://api.freetouse.com/v3    auth: none  → Lo-Fi, Chill, Beats full MP3 streams
  *  [API-15] Incompetech  https://incompetech.com         auth: none  → Kevin MacLeod CC-BY 1,440+ tracks
  *  [API-16] LyricsOvh    https://api.lyrics.ovh/v1       auth: none  → Plain text lyrics fallback
+ *  [API-17] Openverse    https://api.openverse.org/v1    auth: none  → Creative Commons & public domain full tracks
  *  Shared HTTP client: [Http] below (timeouts, User-Agent). Artwork resolution: ArtResolver.kt.
  * ============================================================================================
  */
@@ -199,7 +200,7 @@ object Jamendo {
     }
 
     suspend fun popular(tag: String? = null) = tracks("order=popularity_week" + (tag?.let { "&tags=${Http.enc(it)}" } ?: ""))
-    suspend fun search(q: String) = tracks("search=${Http.enc(q)}&order=relevance")
+    suspend fun search(q: String) = tracks("fuzzysearch=${Http.enc(q)}&order=relevance")
 }
 
 /** [API-4] Radio Browser: open directory of 40k+ live internet radio stations. https://api.radio-browser.info */
@@ -373,8 +374,12 @@ object ReccoBeats {
 
     /** Finds a Spotify track ID for a song, to use as a recommendation seed. */
     suspend fun seedFor(title: String, artist: String): String? {
-        val body = Http.get("$BASE/track/search?searchText=${Http.enc("$title $artist")}") ?: return null
-        val arr = JSONObject(body).optJSONArray("content") ?: return null
+        val q1 = Http.get("$BASE/track/search?searchText=${Http.enc("$title $artist")}")
+        val arr1 = q1?.let { runCatching { JSONObject(it).optJSONArray("content") }.getOrNull() }
+        val arr = if (arr1 != null && arr1.length() > 0) arr1 else {
+            val q2 = Http.get("$BASE/track/search?searchText=${Http.enc(title)}")
+            q2?.let { runCatching { JSONObject(it).optJSONArray("content") }.getOrNull() } ?: return null
+        }
         val a = artist.lowercase().substringBefore(',').trim()
         val hit = arr.mapObj { it }.firstOrNull { o -> o.optJSONArray("artists")?.optJSONObject(0)?.optString("name").orEmpty().lowercase().contains(a.take(10)) }
             ?: arr.optJSONObject(0)
@@ -651,11 +656,50 @@ object LyricsOvh {
     }
 }
 
+/**
+ * [API-17] Openverse: Open-source Creative Commons and public domain audio catalog
+ * operated by the WordPress Foundation. Covers global indie, ambient, instrumental, and cultural recordings.
+ * Full-length playable streams with artwork. Keyless.
+ */
+object Openverse {
+    private const val BASE = "https://api.openverse.org/v1/audio"
+    const val SOURCE = "Openverse"
+
+    private fun parse(o: JSONObject): OnlineTrack? {
+        val id = o.optString("id").ifEmpty { return null }
+        val streamUrl = o.optString("url").ifEmpty { return null }
+        val title = o.optString("title").ifEmpty { "Openverse Audio" }
+        val creator = o.optString("creator").ifEmpty { "Independent Artist" }
+        val album = o.optJSONObject("audio_set")?.optString("title")?.ifEmpty { "Openverse" } ?: "Openverse"
+        val thumb = o.optString("thumbnail").ifEmpty { null }
+        val durationMs = o.optLong("duration", 0L)
+
+        return OnlineTrack(
+            key = "openverse:$id",
+            title = title,
+            artist = creator,
+            album = album,
+            artwork = thumb,
+            durationMs = durationMs,
+            streamUrl = streamUrl,
+            isPreview = false,
+            source = SOURCE,
+        )
+    }
+
+    suspend fun search(q: String): List<OnlineTrack> = withContext(Dispatchers.IO) {
+        val body = Http.get("$BASE/?q=${Http.enc(q)}&page_size=20&category=music") ?: return@withContext emptyList()
+        val arr = runCatching { JSONObject(body).optJSONArray("results") }.getOrNull() ?: return@withContext emptyList()
+        (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.let(::parse) }
+    }
+}
+
 object OnlineCatalog {
     suspend fun search(q: String): List<OnlineTrack> = coroutineScope {
         val js = async { runCatching { JioSaavn.search(q) }.getOrDefault(emptyList()) }
         val ftu = async { runCatching { FreeToUse.search(q) }.getOrDefault(emptyList()) }
         val inc = async { runCatching { Incompetech.search(q) }.getOrDefault(emptyList()) }
+        val opv = async { runCatching { Openverse.search(q) }.getOrDefault(emptyList()) }
         val a = async { runCatching { Audius.search(q) }.getOrDefault(emptyList()) }
         val j = async { runCatching { Jamendo.search(q) }.getOrDefault(emptyList()) }
         val cc = async { runCatching { CcMixter.search(q) }.getOrDefault(emptyList()) }
@@ -666,6 +710,7 @@ object OnlineCatalog {
         val full = js.await().take(15) +
                    ftu.await().take(15) +
                    inc.await().take(15) +
+                   opv.await().take(15) +
                    a.await().take(15) +
                    j.await().take(15) +
                    cc.await().take(10)

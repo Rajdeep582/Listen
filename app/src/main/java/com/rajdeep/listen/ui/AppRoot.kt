@@ -52,6 +52,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -124,6 +125,7 @@ class Nav(val controller: NavHostController) {
     fun list(kind: String) = music("list/$kind")
     fun videoFolder(path: String) = controller.navigate("vfolder/${Uri.encode(path)}")
     fun settings() = controller.navigate("settings") { launchSingleTop = true }
+    fun profile() = controller.navigate("account") { launchSingleTop = true }
     fun back() = controller.popBackStack()
 }
 
@@ -141,9 +143,22 @@ private val videoTabs = listOf(
 
 @Composable
 fun AppRoot(vm: AppViewModel, activity: MainActivity) {
+    // Resolve the "start in video" setting BEFORE building the UI, so the right player is the first
+    // frame (no Music → Video switch on launch). Saved across rotation/process restore.
+    var start by rememberSaveable { mutableStateOf<Mode?>(null) }
+    LaunchedEffect(Unit) {
+        if (start == null) start = if ((activity.application as com.rajdeep.listen.ListenApp).container.settings.current().startInVideo) Mode.VIDEO else Mode.MUSIC
+    }
+    val s = start
+    if (s == null) { Box(Modifier.fillMaxSize().background(Palette.Ink)); return }
+    AppContent(vm, activity, s)
+}
+
+@Composable
+private fun AppContent(vm: AppViewModel, activity: MainActivity, startMode: Mode) {
     val nav = rememberNavController()
     val navApi = remember(nav) { Nav(nav) }
-    var mode by rememberSaveable { mutableStateOf(Mode.MUSIC) }
+    var mode by rememberSaveable { mutableStateOf(startMode) }
     var expanded by rememberSaveable { mutableStateOf(false) }
     val playerState by vm.player.state.collectAsStateWithLifecycle()
     val openSignal by activity.openPlayerSignal.collectAsStateWithLifecycle()
@@ -153,10 +168,17 @@ fun AppRoot(vm: AppViewModel, activity: MainActivity) {
     // beat later so the heavy screen swap never competes with the toggle animation for frames.
     var toggleMode by rememberSaveable { mutableStateOf(mode) }
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val accountUser by vm.accountUser.collectAsStateWithLifecycle()
+    val accountReady by vm.accountReady.collectAsStateWithLifecycle()
+    if (startMode == Mode.MUSIC && !accountReady) { Box(Modifier.fillMaxSize().background(Palette.Ink)); return }
     val reduceMotion = settings.reduceMotion
-    var startApplied by rememberSaveable { mutableStateOf(false) }
 
     fun switchMode(m: Mode) {
+        if (m == Mode.MUSIC && accountReady && accountUser == null) {
+            toggleMode = Mode.MUSIC
+            nav.navigate("auth") { popUpTo(nav.graph.id) { saveState = false }; launchSingleTop = true }
+            return
+        }
         if (m == toggleMode && m == mode) {
             // tapping the active mode returns to its front page (e.g. from Settings or a detail page)
             val front = if (m == Mode.MUSIC) "home" else "vhome"
@@ -168,30 +190,40 @@ fun AppRoot(vm: AppViewModel, activity: MainActivity) {
         toggleMode = m
     }
     var pendingNav by remember { mutableStateOf<(() -> Unit)?>(null) }
-    navApi.musicGate = { action -> if (mode == Mode.MUSIC && toggleMode == Mode.MUSIC) action() else { pendingNav = action; toggleMode = Mode.MUSIC } }
+    navApi.musicGate = { action ->
+        if (accountReady && accountUser == null) {
+            toggleMode = Mode.MUSIC
+            nav.navigate("auth") { launchSingleTop = true }
+        } else if (mode == Mode.MUSIC && toggleMode == Mode.MUSIC) action()
+        else { pendingNav = action; toggleMode = Mode.MUSIC }
+    }
 
     // Each mode always opens on its own front page: the back stack is cleared, never restored, so
     // e.g. Video → Settings → Music → Video lands on Video home (not on Settings).
-    LaunchedEffect(toggleMode) {
+    LaunchedEffect(toggleMode, accountReady, accountUser) {
+        if (toggleMode == Mode.MUSIC && accountReady && accountUser == null) {
+            mode = Mode.MUSIC
+            nav.navigate("auth") {
+                popUpTo(nav.graph.id) { inclusive = false; saveState = false }
+                launchSingleTop = true; restoreState = false
+            }
+            pendingNav = null
+            return@LaunchedEffect
+        }
         if (toggleMode == mode) return@LaunchedEffect
         kotlinx.coroutines.delay(if (reduceMotion) 0 else 140)
         mode = toggleMode
-        nav.navigate(if (toggleMode == Mode.MUSIC) "music" else "video") {
+        nav.navigate(if (toggleMode == Mode.MUSIC && accountReady && accountUser == null) "auth" else if (toggleMode == Mode.MUSIC) "music" else "video") {
             popUpTo(nav.graph.id) { inclusive = false; saveState = false }
             launchSingleTop = true; restoreState = false
         }
         pendingNav?.let { pendingNav = null; it() }
     }
-    LaunchedEffect(Unit) {
-        if (!startApplied) {
-            startApplied = true
-            if (vm.library.let { (activity.application as com.rajdeep.listen.ListenApp).container.settings.current().startInVideo }) toggleMode = Mode.VIDEO
-        }
-    }
 
     val hasMini = playerState.current != null
+    val showMini = hasMini && mode == Mode.MUSIC && toggleMode == Mode.MUSIC
     val navBarInset = WindowInsets.navigationBars
-    val bottomInset: Dp = (if (hasMini) 72.dp else 0.dp) + 68.dp + 12.dp
+    val bottomInset: Dp = (if (showMini) 72.dp else 0.dp) + 68.dp + 12.dp
 
     ListenTheme(mode) {
       CompositionLocalProvider(com.rajdeep.listen.ui.theme.LocalReduceMotion provides reduceMotion) {
@@ -214,9 +246,9 @@ fun AppRoot(vm: AppViewModel, activity: MainActivity) {
 
             CompositionLocalProvider(LocalBottomInset provides bottomInset) {
                 Column(Modifier.fillMaxSize()) {
-                    TopBar(toggleMode, ::switchMode, onSettings = navApi::settings)
+                    TopBar(toggleMode, ::switchMode, onSettings = navApi::settings, onAccount = navApi::profile, showAccount = accountUser != null)
                     NavHost(
-                        navController = nav, startDestination = "music", modifier = Modifier.weight(1f),
+                        navController = nav, startDestination = if (startMode == Mode.VIDEO) "video" else if (accountUser == null) "auth" else "music", modifier = Modifier.weight(1f),
                         // Weighted, slightly slow motion (M3 "emphasized" curve): content settles in rather than snapping.
                         enterTransition = {
                             when {
@@ -243,6 +275,20 @@ fun AppRoot(vm: AppViewModel, activity: MainActivity) {
                     ) {
                         musicGraph(vm, navApi)
                         videoGraph(vm, navApi, activity)
+                        composable("auth") {
+                            AccountScreen(vm, onAuthenticated = {
+                                toggleMode = Mode.MUSIC
+                                nav.navigate("music") { popUpTo(nav.graph.id) { inclusive = false }; launchSingleTop = true }
+                            }, onSignOut = {})
+                        }
+                        composable("account") {
+                            if (accountUser == null) AccountScreen(vm, onAuthenticated = {
+                                nav.navigate("music") { launchSingleTop = true }
+                            }, onSignOut = {})
+                            else ProfileScreen(vm, accountUser, onSignOut = {
+                                vm.signOut(); nav.navigate("auth") { popUpTo(nav.graph.id) { inclusive = false }; launchSingleTop = true }
+                            })
+                        }
                         composable("settings") { SettingsScreen(vm, activity) }
                     }
                 }
@@ -250,13 +296,13 @@ fun AppRoot(vm: AppViewModel, activity: MainActivity) {
 
             // bottom chrome
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
-                AnimatedVisibility(hasMini, enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+                AnimatedVisibility(showMini, enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
                     MiniPlayer(vm.player, playerState, onExpand = { expanded = true }, modifier = Modifier.padding(horizontal = 10.dp))
                 }
                 androidx.compose.animation.AnimatedContent(
                     toggleMode, label = "tabs",
                     transitionSpec = { (fadeIn(tween(220, delayMillis = 60)) togetherWith fadeOut(tween(120))) },
-                ) { m -> BottomNav(if (m == Mode.MUSIC) musicTabs else videoTabs, nav) }
+                ) { m -> if (m == Mode.VIDEO || accountUser != null) BottomNav(if (m == Mode.MUSIC) musicTabs else videoTabs, nav) }
                 Spacer(Modifier.fillMaxWidth().windowInsetsBottomHeight(navBarInset).background(Palette.Ink.copy(alpha = 0.96f)))
             }
 
@@ -295,7 +341,6 @@ private fun NavGraphBuilder.musicGraph(vm: AppViewModel, nav: Nav) {
     navigation(startDestination = "home", route = "music") {
         composable("home") { HomeScreen(vm, nav) }
         composable("explore") { ExploreScreen(vm) }
-        composable("foryou") { com.rajdeep.listen.ui.music.ForYouScreen(vm, nav) }
         composable("radio") { com.rajdeep.listen.ui.radio.RadioScreen(vm) }
         composable("library") { LibraryScreen(vm, nav) }
         composable("search") { SearchScreen(vm, nav, Mode.MUSIC) }
@@ -318,13 +363,14 @@ private fun NavGraphBuilder.videoGraph(vm: AppViewModel, nav: Nav, activity: Mai
 }
 
 @Composable
-private fun TopBar(mode: Mode, onMode: (Mode) -> Unit, onSettings: () -> Unit) {
+private fun TopBar(mode: Mode, onMode: (Mode) -> Unit, onSettings: () -> Unit, onAccount: () -> Unit, showAccount: Boolean) {
     Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 20.dp, end = 8.dp, top = 6.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("listen", style = MaterialTheme.typography.headlineMedium, color = Palette.Text)
         Box(Modifier.size(6.dp).offset(x = 2.dp, y = 6.dp).clip(CircleShape).background(LocalAccent.current.primary))
         Spacer(Modifier.weight(1f))
         ModeToggle(mode, onMode)
         Spacer(Modifier.width(4.dp))
+        if (mode == Mode.MUSIC && showAccount) IconButton(onClick = onAccount) { Icon(Icons.Rounded.AccountCircle, "Profile", tint = Palette.TextDim) }
         IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "Settings", tint = Palette.TextDim) }
     }
 }

@@ -7,9 +7,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.content.Context
 import android.media.AudioManager
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -19,6 +21,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -26,6 +29,9 @@ import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -90,9 +96,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import com.rajdeep.listen.playback.PlayerUiState
@@ -209,20 +218,81 @@ fun ExpandedPlayer(
             Spacer(Modifier.height(6.dp))
             // transport
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = player::toggleShuffle) { Icon(Icons.Rounded.Shuffle, "Shuffle", tint = if (state.shuffle) accent.primary else Palette.TextDim) }
-                IconButton(onClick = player::previous, modifier = Modifier.size(56.dp)) { Icon(Icons.Rounded.SkipPrevious, "Previous", tint = Palette.Text, modifier = Modifier.size(40.dp)) }
-                val ps by animateFloatAsState(if (state.isPlaying) 1f else 0.94f, spring(dampingRatio = 0.5f), label = "ps")
+                PressIcon(
+                    icon = Icons.Rounded.Shuffle,
+                    label = "Shuffle",
+                    size = 26.dp,
+                    tint = if (state.shuffle) accent.primary else Palette.TextDim,
+                    active = state.shuffle,
+                    onClick = player::toggleShuffle,
+                )
+                PressIcon(
+                    icon = Icons.Rounded.SkipPrevious,
+                    label = "Previous",
+                    size = 38.dp,
+                    tint = Palette.Text,
+                    active = false,
+                    onClick = player::previous,
+                )
+                val playSrc = remember { MutableInteractionSource() }
+                val playPressed by playSrc.collectIsPressedAsState()
+                val playScale by animateFloatAsState(
+                    if (playPressed) 0.88f else 1f,
+                    spring(dampingRatio = 0.55f, stiffness = 900f),
+                    label = "play_scale"
+                )
+                val haptic = LocalHapticFeedback.current
                 Box(
-                    Modifier.size(78.dp).graphicsLayer { scaleX = ps; scaleY = ps }.shadow(18.dp, CircleShape, ambientColor = colors.vibrant, spotColor = colors.vibrant)
-                        .clip(CircleShape).background(Palette.Text).clickable(onClick = player::togglePlay),
+                    Modifier
+                        .size(78.dp)
+                        .graphicsLayer { scaleX = playScale; scaleY = playScale }
+                        .shadow(18.dp, CircleShape, ambientColor = colors.vibrant, spotColor = colors.vibrant)
+                        .clip(CircleShape)
+                        .background(Palette.Text)
+                        .clickable(
+                            interactionSource = playSrc,
+                            indication = null,
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                player.togglePlay()
+                            }
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, "Play/Pause", tint = Palette.Ink, modifier = Modifier.size(42.dp))
+                    AnimatedContent(
+                        targetState = state.isPlaying,
+                        transitionSpec = {
+                            (fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.75f)) togetherWith
+                            (fadeOut(tween(150)) + scaleOut(tween(150), targetScale = 0.75f))
+                        },
+                        label = "play_icon"
+                    ) { playing ->
+                        Icon(
+                            if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            "Play/Pause",
+                            tint = Palette.Ink,
+                            modifier = Modifier.size(42.dp)
+                        )
+                    }
                 }
-                IconButton(onClick = player::next, modifier = Modifier.size(56.dp)) { Icon(Icons.Rounded.SkipNext, "Next", tint = Palette.Text, modifier = Modifier.size(40.dp)) }
-                IconButton(onClick = player::cycleRepeat) {
-                    Icon(if (state.repeat == Player.REPEAT_MODE_ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, "Repeat", tint = if (state.repeat != Player.REPEAT_MODE_OFF) accent.primary else Palette.TextDim)
-                }
+                PressIcon(
+                    icon = Icons.Rounded.SkipNext,
+                    label = "Next",
+                    size = 38.dp,
+                    tint = Palette.Text,
+                    active = false,
+                    onClick = player::next,
+                )
+                val repeatOne = state.repeat == Player.REPEAT_MODE_ONE
+                val repeatOn = state.repeat != Player.REPEAT_MODE_OFF
+                PressIcon(
+                    icon = if (repeatOne) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+                    label = "Repeat",
+                    size = 26.dp,
+                    tint = if (repeatOn) accent.primary else Palette.TextDim,
+                    active = repeatOn,
+                    onClick = player::cycleRepeat,
+                )
             }
             Spacer(Modifier.height(4.dp))
             VolumeRow(colors.vibrant)
@@ -354,17 +424,95 @@ private fun LiveBar() {
 }
 
 @Composable
+private fun PressIcon(
+    icon: ImageVector,
+    label: String,
+    size: Dp,
+    tint: Color,
+    active: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val accent = LocalAccent.current.primary
+    val src = remember { MutableInteractionSource() }
+    val pressed by src.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        if (pressed) 0.86f else 1f,
+        spring(dampingRatio = 0.55f, stiffness = 900f),
+        label = "press_icon"
+    )
+    val haptic = LocalHapticFeedback.current
+    Column(
+        modifier = Modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(CircleShape)
+            .clickable(
+                interactionSource = src,
+                indication = null,
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                }
+            )
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(size))
+        Spacer(Modifier.height(3.dp))
+        Box(
+            Modifier
+                .size(4.dp)
+                .clip(CircleShape)
+                .background(if (active) accent else Color.Transparent)
+        )
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
 private fun SeekBar(vm: AppViewModel, duration: Long) {
     val pos by remember { vm.player.positionFlow(200) }.collectAsStateWithLifecycle(0L)
     var drag by remember { mutableStateOf<Float?>(null) }
     val len = duration.coerceAtLeast(1)
     val shown = drag?.toLong() ?: pos
+    val interactionSource = remember { MutableInteractionSource() }
+    val isDragged by interactionSource.collectIsDraggedAsState()
+    val thumbSize by animateDpAsState(
+        targetValue = if (isDragged) 20.dp else 14.dp,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = 900f),
+        label = "seek_thumb"
+    )
+    val sliderColors = SliderDefaults.colors(
+        thumbColor = Palette.Text,
+        activeTrackColor = Palette.Text,
+        inactiveTrackColor = Palette.Text.copy(alpha = 0.18f)
+    )
     Column {
         Slider(
-            value = shown.toFloat().coerceIn(0f, len.toFloat()), valueRange = 0f..len.toFloat(),
-            onValueChange = { drag = it }, onValueChangeFinished = { drag?.let { vm.player.seekTo(it.toLong()) }; drag = null },
-            colors = SliderDefaults.colors(thumbColor = Palette.Text, activeTrackColor = Palette.Text, inactiveTrackColor = Palette.Text.copy(alpha = 0.18f)),
+            value = shown.toFloat().coerceIn(0f, len.toFloat()),
+            valueRange = 0f..len.toFloat(),
+            onValueChange = { drag = it },
+            onValueChangeFinished = { drag?.let { vm.player.seekTo(it.toLong()) }; drag = null },
+            interactionSource = interactionSource,
+            colors = sliderColors,
             modifier = Modifier.height(28.dp),
+            thumb = {
+                Box(
+                    Modifier
+                        .size(thumbSize)
+                        .clip(CircleShape)
+                        .background(Palette.Text)
+                )
+            },
+            track = { sliderState ->
+                SliderDefaults.Track(
+                    sliderState = sliderState,
+                    modifier = Modifier.height(4.dp),
+                    colors = sliderColors,
+                    drawStopIndicator = null,
+                    thumbTrackGapSize = 0.dp,
+                )
+            }
         )
         Row {
             Text(formatDuration(shown), style = MaterialTheme.typography.labelMedium, color = Palette.TextDim)
@@ -374,6 +522,7 @@ private fun SeekBar(vm: AppViewModel, duration: Long) {
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun VolumeRow(color: Color) {
     val ctx = LocalContext.current
@@ -383,14 +532,45 @@ private fun VolumeRow(color: Color) {
     var dragging by remember { mutableStateOf(false) }
     val lo = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(lo) { lo.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) { while (true) { if (!dragging) vol = am.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat(); delay(800) } } }
+    val interactionSource = remember { MutableInteractionSource() }
+    val isDragged by interactionSource.collectIsDraggedAsState()
+    val thumbSize by animateDpAsState(
+        targetValue = if (isDragged) 20.dp else 14.dp,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = 900f),
+        label = "vol_thumb"
+    )
+    val sliderColors = SliderDefaults.colors(
+        thumbColor = color,
+        activeTrackColor = color,
+        inactiveTrackColor = Palette.Text.copy(alpha = 0.14f)
+    )
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.AutoMirrored.Rounded.VolumeDown, null, tint = Palette.TextDim, modifier = Modifier.size(20.dp))
         Slider(
-            value = vol, valueRange = 0f..max.toFloat(),
+            value = vol,
+            valueRange = 0f..max.toFloat(),
             onValueChange = { dragging = true; vol = it; am.setStreamVolume(AudioManager.STREAM_MUSIC, it.roundToInt(), 0) },
             onValueChangeFinished = { dragging = false },
-            colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color, inactiveTrackColor = Palette.Text.copy(alpha = 0.14f)),
+            interactionSource = interactionSource,
+            colors = sliderColors,
             modifier = Modifier.weight(1f).height(24.dp).padding(horizontal = 6.dp),
+            thumb = {
+                Box(
+                    Modifier
+                        .size(thumbSize)
+                        .clip(CircleShape)
+                        .background(color)
+                )
+            },
+            track = { sliderState ->
+                SliderDefaults.Track(
+                    sliderState = sliderState,
+                    modifier = Modifier.height(4.dp),
+                    colors = sliderColors,
+                    drawStopIndicator = null,
+                    thumbTrackGapSize = 0.dp,
+                )
+            }
         )
         Icon(Icons.AutoMirrored.Rounded.VolumeUp, null, tint = Palette.TextDim, modifier = Modifier.size(20.dp))
     }
@@ -399,9 +579,34 @@ private fun VolumeRow(color: Color) {
 @Composable
 private fun PaneButton(icon: ImageVector, label: String, active: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     val accent = LocalAccent.current.primary
+    val src = remember { MutableInteractionSource() }
+    val pressed by src.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        if (pressed) 0.88f else 1f,
+        spring(dampingRatio = 0.55f, stiffness = 900f),
+        label = "pane_scale"
+    )
+    val haptic = LocalHapticFeedback.current
+    val bgColor by animateColorAsState(
+        targetValue = if (active) accent.copy(alpha = 0.16f) else Color.Transparent,
+        animationSpec = tween(200),
+        label = "pane_bg"
+    )
     Column(
-        Modifier.clip(RoundedCornerShape(14.dp)).clickable(enabled = enabled, onClick = onClick)
-            .background(if (active) accent.copy(alpha = 0.16f) else Color.Transparent).padding(horizontal = 14.dp, vertical = 6.dp),
+        modifier = Modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(RoundedCornerShape(14.dp))
+            .background(bgColor)
+            .clickable(
+                enabled = enabled,
+                interactionSource = src,
+                indication = null,
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                }
+            )
+            .padding(horizontal = 14.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(icon, label, tint = when { !enabled -> Palette.TextFaint; active -> accent; else -> Palette.Text }, modifier = Modifier.size(22.dp))

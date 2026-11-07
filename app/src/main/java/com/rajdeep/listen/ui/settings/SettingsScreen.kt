@@ -248,7 +248,7 @@ fun SettingsScreen(vm: AppViewModel, activity: MainActivity) {
                 Spacer(Modifier.height(16.dp))
                 Text("BUILT WITH", style = MaterialTheme.typography.labelSmall, color = Palette.TextFaint)
                 Text(
-                    "Kotlin · Jetpack Compose · Media3 ExoPlayer · libVLC · Room · Coil\nMusic & Lyrics: JioSaavn, FreeToUse, Incompetech, Audius, Jamendo, Deezer, iTunes, ccMixter, Internet Archive, RadioBrowser, LRCLIB, Lyrics.ovh",
+                    "Kotlin · Jetpack Compose · Media3 ExoPlayer · libVLC · Room · Coil\nMusic & Lyrics: JioSaavn, FreeToUse, Incompetech, Openverse, Audius, Jamendo, Deezer, iTunes, ccMixter, Internet Archive, RadioBrowser, LRCLIB, Lyrics.ovh",
                     style = MaterialTheme.typography.bodySmall, color = Palette.TextDim,
                 )
                 Spacer(Modifier.height(12.dp))

@@ -13,6 +13,7 @@ import com.rajdeep.listen.data.online.Incompetech
 import com.rajdeep.listen.data.online.Jamendo
 import com.rajdeep.listen.data.online.JioSaavn
 import com.rajdeep.listen.data.online.OnlineTrack
+import com.rajdeep.listen.data.online.Openverse
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -42,14 +43,11 @@ class Recommender(private val context: Context, private val dao: LibraryDao) {
         if (!force) cached()?.let { return it }
         val artists = dao.topArtistNames(8).filterNot { it.lowercase().startsWith("unknown") }
         val taste = dao.tasteSongs(15)
-        // AI DISABLED (owner request) — to re-enable AI picks, replace the next line with:
-        // val out = ai(artists, taste) ?: fallback(artists)
-        val out = recco(taste, artists) ?: fallback(artists)
+        val out = ai(artists, taste) ?: recco(taste, artists) ?: fallback(artists)
         save(out)
         return out
     }
 
-    @Suppress("unused") // kept for when AI is re-enabled
     private suspend fun ai(artists: List<String>, taste: List<Song>): List<Suggestion>? {
         if (artists.isEmpty() && taste.isEmpty()) return null
         val profile = buildString {
@@ -81,6 +79,7 @@ class Recommender(private val context: Context, private val dao: LibraryDao) {
         val full = runCatching { Audius.search(q) }.getOrDefault(emptyList()) +
                    runCatching { FreeToUse.search(q) }.getOrDefault(emptyList()) +
                    runCatching { Incompetech.search(q) }.getOrDefault(emptyList()) +
+                   runCatching { Openverse.search(q) }.getOrDefault(emptyList()) +
                    runCatching { Jamendo.search(q) }.getOrDefault(emptyList())
         full.firstOrNull { SearchEngine.score(title, listOf(it.title to 1)) > 0 }?.let { return Suggestion.Online(it, reason) }
         return runCatching { ITunes.search(q) }.getOrDefault(emptyList()).firstOrNull()?.let { Suggestion.Online(it, reason) }

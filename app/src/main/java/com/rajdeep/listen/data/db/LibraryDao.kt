@@ -63,6 +63,8 @@ interface LibraryDao {
 
     @Query("SELECT $SONG_COLS $SONG_FROM WHERE st.isFavorite = 1 ORDER BY s.title COLLATE NOCASE")
     fun favourites(): Flow<List<Song>>
+    @Query("SELECT $SONG_COLS $SONG_FROM WHERE st.isFavorite = 1 ORDER BY s.title COLLATE NOCASE")
+    suspend fun allFavourites(): List<Song>
 
     @Query("SELECT $SONG_COLS $SONG_FROM WHERE st.lastPlayed > 0 ORDER BY st.lastPlayed DESC LIMIT :limit")
     fun recentlyPlayed(limit: Int): Flow<List<Song>>
@@ -83,7 +85,8 @@ interface LibraryDao {
     )
     suspend fun discoverFromTopArtists(limit: Int): List<Song>
 
-    @Query("SELECT s.artist FROM songs s JOIN song_stats st ON st.songId = s.id WHERE st.playCount > 0 GROUP BY s.artist ORDER BY SUM(st.playCount) DESC LIMIT :limit")
+    // Favourites weigh 10× a play, so AI / suggestions lean mostly on hearted songs, then history.
+    @Query("SELECT s.artist FROM songs s JOIN song_stats st ON st.songId = s.id WHERE st.playCount > 0 OR st.isFavorite = 1 GROUP BY s.artist ORDER BY SUM(st.playCount + 10 * st.isFavorite) DESC LIMIT :limit")
     suspend fun topArtistNames(limit: Int): List<String>
 
     @Query("SELECT $SONG_COLS $SONG_FROM WHERE st.lastPlayed > 0 OR st.isFavorite = 1 ORDER BY st.isFavorite DESC, st.lastPlayed DESC LIMIT :limit")
@@ -135,13 +138,28 @@ interface LibraryDao {
     // ---------- stats ----------
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun ensureStats(stats: SongStatsEntity)
     @Query("UPDATE song_stats SET isFavorite = NOT isFavorite WHERE songId = :id") suspend fun flipFavorite(id: Long)
+    @Query("SELECT isFavorite FROM song_stats WHERE songId = :id") suspend fun isFavorite(id: Long): Boolean?
     @Query("UPDATE song_stats SET playCount = playCount + 1, lastPlayed = :at WHERE songId = :id") suspend fun bumpPlay(id: Long, at: Long)
+    @Query("UPDATE song_stats SET isFavorite = 0") suspend fun clearFavorites()
+    @Query("UPDATE song_stats SET isFavorite = 1 WHERE songId IN (:ids)") suspend fun markFavorites(ids: List<Long>)
     @Insert suspend fun insertHistory(h: HistoryEntity)
     @Query("DELETE FROM history") suspend fun clearHistory()
     @Query("UPDATE song_stats SET lastPlayed = 0") suspend fun clearLastPlayed()
 
     @Transaction
-    suspend fun toggleFavorite(id: Long) { ensureStats(SongStatsEntity(id)); flipFavorite(id) }
+    suspend fun toggleFavorite(id: Long): Boolean {
+        ensureStats(SongStatsEntity(id)); flipFavorite(id)
+        return isFavorite(id) == true
+    }
+
+    @Transaction
+    suspend fun replaceFavorites(ids: List<Long>) {
+        clearFavorites()
+        ids.chunked(500).forEach { chunk ->
+            chunk.forEach { ensureStats(SongStatsEntity(it)) }
+            markFavorites(chunk)
+        }
+    }
 
     @Transaction
     suspend fun recordPlay(id: Long, at: Long) {

@@ -125,6 +125,26 @@ fun HomeScreen(vm: AppViewModel, nav: Nav) {
                 }
             }
         }
+        // Favourites (hearted songs)
+        item(key = "favs") {
+            val favList = favs.orEmpty()
+            SectionHeader(
+                "Favourites",
+                "Songs you love",
+                action = if (favList.isNotEmpty()) "See all" else null,
+                onAction = if (favList.isNotEmpty()) { { nav.list("favourites") } } else null,
+            )
+            if (favList.isNotEmpty()) {
+                SongCards(favList.take(15), onPlay = { i -> player.playSongs(favList, i) }, onLong = { vm.menuSong.value = it })
+            } else {
+                Text(
+                    "Tap the heart (♥) on any song to add it here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Palette.TextDim,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                )
+            }
+        }
         // Continue listening
         val cont = recent.orEmpty()
         if (cont.isNotEmpty()) {
@@ -133,7 +153,6 @@ fun HomeScreen(vm: AppViewModel, nav: Nav) {
                 SongCards(cont.take(15), onPlay = { i -> player.playSongs(cont, i) }, onLong = { vm.menuSong.value = it })
             }
         }
-        if (settings.onlineEnabled) item(key = "foryou") { ForYouSection(vm, nav) }
         // Mixes generated from listening data
         item(key = "mixes") {
             val mixes = remember(most, discover, rediscover, added, topArtists, songs) { buildList {
@@ -239,10 +258,20 @@ private fun MixCard(m: Mix, onClick: () -> Unit) {
 
 @Composable
 fun SongCards(songs: List<Song>, onPlay: (Int) -> Unit, onLong: (Song) -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val app = ctx.applicationContext as com.rajdeep.listen.ListenApp
     LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         items(songs.size, key = { songs[it].id }) { i ->
             val s = songs[i]
-            MediaCard(s.title, s.artist, songArt(s), s.album, lookup = com.rajdeep.listen.ui.components.songLookup(s), onClick = { onPlay(i) }, width = 136.dp, onLongClick = { onLong(s) })
+            MediaCard(
+                s.title, s.artist, songArt(s), s.album,
+                lookup = com.rajdeep.listen.ui.components.songLookup(s),
+                onClick = { onPlay(i) },
+                width = 136.dp,
+                onLongClick = { onLong(s) },
+                isFavorite = s.isFavorite,
+                onFavoriteClick = { app.container.library.toggleFavorite(s.id) },
+            )
         }
     }
 }

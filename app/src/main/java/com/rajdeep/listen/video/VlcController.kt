@@ -74,9 +74,14 @@ class VlcController(private val context: Context) {
     private var prefAudioLang = ""
     private var prefSubLang = ""
     private var restoredTracks = false
+    /** Resume point, re-applied on first Playing if :start-time was ignored by the demuxer. */
+    private var pendingStart = 0L
+    /** LibVLC is expensive to create (~100–300 ms); reuse it while options are unchanged. */
+    private var libOpts: List<String>? = null
 
     private fun buildOptions(s: Settings): ArrayList<String> = arrayListOf(
-        "--no-drop-late-frames", "--no-skip-frames",
+        // Let VLC drop/skip late frames: keeps A/V in sync and avoids stutter on heavy files.
+        "--file-caching=300", "--network-caching=1000",
         "--audio-time-stretch",
         "--avcodec-skiploopfilter=1",
         "--sub-text-scale=${s.subSizePercent.coerceIn(30, 400)}",
@@ -106,14 +111,19 @@ class VlcController(private val context: Context) {
     fun detachViews() { player?.detachViews() }
 
     fun open(uri: Uri, settings: Settings, startMs: Long, audio: Int, spu: Int, subtitleUri: String?, rate: Float, spuDelay: Long, audioDelay: Long) {
-        releasePlayer()
+        releasePlayer(keepLib = true)
         currentUri = uri
+        pendingStart = startMs
         pendingAudio = audio; pendingSpu = spu; restoredTracks = false
         prefAudioLang = settings.prefAudioLang.lowercase(); prefSubLang = settings.prefSubLang.lowercase()
         _state.value = VideoUiState(rate = rate, spuDelayUs = spuDelay, audioDelayUs = audioDelay, scale = _state.value.scale, subtitleUri = subtitleUri)
         _time.value = startMs
 
-        val lib = LibVLC(context, buildOptions(settings)).also { libVlc = it }
+        val opts = buildOptions(settings)
+        val lib = libVlc?.takeIf { opts == libOpts } ?: run {
+            libVlc?.release()
+            LibVLC(context, opts).also { libVlc = it; libOpts = opts }
+        }
         val mp = MediaPlayer(lib).also { player = it }
         mp.setEventListener(::onEvent)
         layout?.let { mp.attachViews(it, null, true, true) }
@@ -140,7 +150,11 @@ class VlcController(private val context: Context) {
     private fun onEvent(e: MediaPlayer.Event) {
         val mp = player ?: return
         when (e.type) {
-            MediaPlayer.Event.Playing -> { update { copy(isPlaying = true, buffering = false, ended = false, error = null) }; refreshTracks() }
+            MediaPlayer.Event.Playing -> {
+                update { copy(isPlaying = true, buffering = false, ended = false, error = null) }; refreshTracks()
+                val ps = pendingStart
+                if (ps > 0) { pendingStart = 0; if (mp.time < ps - 1500) mp.time = ps }
+            }
             MediaPlayer.Event.Paused -> update { copy(isPlaying = false) }
             MediaPlayer.Event.Stopped -> update { copy(isPlaying = false) }
             MediaPlayer.Event.EndReached -> update { copy(isPlaying = false, ended = true) }
@@ -274,10 +288,10 @@ class VlcController(private val context: Context) {
 
     fun snapshotState(): VideoUiState = _state.value
 
-    private fun releasePlayer() {
+    private fun releasePlayer(keepLib: Boolean = false) {
         player?.let { it.setEventListener(null); it.stop(); it.detachViews(); it.release() }
         player = null
-        libVlc?.release(); libVlc = null
+        if (!keepLib) { libVlc?.release(); libVlc = null; libOpts = null }
         runCatching { pfd?.close() }; pfd = null
     }
 

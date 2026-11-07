@@ -20,13 +20,28 @@ android {
         applicationId = "com.rajdeep.listen"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.4.0"
+        versionCode = 5
+        versionName = "1.5.0"
         // Ship only real-device ABIs; drop x86 to keep APK small.
         // Optional: free key from console.groq.com → fast AI suggestions (else keyless fallback is used).
         buildConfigField("String", "GROQ_API_KEY", "\"${secrets.getProperty("GROQ_API_KEY", "")}\"")
         buildConfigField("String", "JAMENDO_CLIENT_ID", "\"${secrets.getProperty("JAMENDO_CLIENT_ID", "")}\"")
+        buildConfigField("String", "ACCOUNT_API_BASE_URL", "\"${secrets.getProperty("ACCOUNT_API_BASE_URL", "https://your-listen-api.example").trimEnd('/')}/\"")
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+    }
+
+    signingConfigs {
+        create("release") {
+            val keyFile = file("listen.keystore")
+            if (keyFile.exists()) {
+                storeFile = keyFile
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            } else {
+                initWith(getByName("debug"))
+            }
+        }
     }
 
     buildTypes {
@@ -34,7 +49,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     splits {
@@ -89,4 +104,5 @@ dependencies {
     implementation(libs.profileinstaller)
     // libVLC pulls an old Fragment transitively; pin a modern one (Activity Result API requirement).
     implementation(libs.fragment)
+    implementation(libs.security.crypto)
 }

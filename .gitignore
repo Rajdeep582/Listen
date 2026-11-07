@@ -6,5 +6,7 @@ app/build/
 *.iml
 .kotlin/
 secrets.properties
+backend/.env
+backend/node_modules/
 *.apk
 *.aab

@@ -238,12 +238,17 @@ private fun Thumb(v: Video, modifier: Modifier) {
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 fun VideoRow(v: Video, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = { VideoMenu.target.value = v }).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Thumb(v, Modifier.width(150.dp).aspectRatio(16 / 9f))
-        Spacer(Modifier.width(14.dp))
+        // Compact thumbnail so the title / details get most of the row.
+        Thumb(v, Modifier.width(104.dp).aspectRatio(16 / 9f))
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(v.title, style = MaterialTheme.typography.titleSmall, color = Palette.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(2.dp))
-            Text(listOfNotNull(resLabel(v), formatSize(v.size), v.folder.substringAfterLast('/')).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Palette.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(v.title, style = MaterialTheme.typography.titleSmall, color = Palette.Text, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(3.dp))
+            Text(listOfNotNull(formatDuration(v.duration).takeIf { v.duration > 0 }, resLabel(v), formatSize(v.size)).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Palette.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(v.folder.substringAfterLast('/'), style = MaterialTheme.typography.bodySmall, color = Palette.TextFaint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (v.position > 5_000 && v.duration > 0 && v.position < v.duration - 10_000) {
+                Text("Resume from ${formatDuration(v.position)}", style = MaterialTheme.typography.labelSmall, color = LocalAccent.current.primary, maxLines = 1)
+            }
         }
         IconButton(onClick = { VideoMenu.target.value = v }) { Icon(Icons.Rounded.MoreVert, "More", tint = Palette.TextDim) }
     }

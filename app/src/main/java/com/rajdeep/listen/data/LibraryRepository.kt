@@ -41,8 +41,10 @@ class LibraryRepository(
     private val scanner: MediaScanner,
     private val settings: SettingsStore,
     private val scope: CoroutineScope,
+    private val account: AccountClient,
 ) {
     private val scanMutex = Mutex()
+    private val favoriteMutex = Mutex()
     private val _scanning = MutableStateFlow(false)
     val scanning: StateFlow<Boolean> = _scanning.asStateFlow()
 
@@ -83,8 +85,21 @@ class LibraryRepository(
     }
 
     // ---- writes ----
-    fun toggleFavorite(id: Long) = scope.launch { dao.toggleFavorite(id) }
-    fun recordPlay(id: Long) = scope.launch { dao.recordPlay(id, System.currentTimeMillis()) }
+    fun toggleFavorite(id: Long) = scope.launch {
+        favoriteMutex.withLock {
+            val song = dao.songsByIds(listOf(id)).firstOrNull()
+            val isFavorite = dao.toggleFavorite(id)
+            if (song != null && account.token != null) account.user?.id?.let { ownerId -> runCatching {
+                account.syncFavorite(ownerId, "local:$id", isFavorite, song.title, song.artist, song.album)
+            } }
+        }
+    }
+    fun recordPlay(id: Long) = scope.launch {
+        dao.recordPlay(id, System.currentTimeMillis())
+        if (account.token != null) dao.songsByIds(listOf(id)).firstOrNull()?.let { song ->
+            runCatching { account.recordPlay("local:$id", song.title, song.artist, song.album) }
+        }
+    }
     fun clearHistory() = scope.launch { dao.clearHistory(); dao.clearLastPlayed() }
 
     suspend fun createPlaylist(name: String, songIds: List<Long> = emptyList()): Long {

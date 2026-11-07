@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -26,6 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.MusicNote
@@ -208,6 +210,14 @@ fun SongRow(
                 Text("${song.artist} · ${formatDuration(song.duration)}", style = MaterialTheme.typography.bodyMedium, color = Palette.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
+        val app = LocalContext.current.applicationContext as com.rajdeep.listen.ListenApp
+        IconButton(onClick = { app.container.library.toggleFavorite(song.id) }) {
+            Icon(
+                if (song.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                if (song.isFavorite) "Remove from favourites" else "Add to favourites",
+                tint = if (song.isFavorite) accent else Palette.TextDim,
+            )
+        }
         IconButton(onClick = onMore) { Icon(Icons.Rounded.MoreVert, "More", tint = Palette.TextDim) }
     }
 }
@@ -246,12 +256,38 @@ fun MediaCard(
     onLongClick: (() -> Unit)? = null,
     lookup: com.rajdeep.listen.data.online.ArtResolver.Query? = null,
     preferLookup: Boolean = false,
+    isFavorite: Boolean? = null,
+    onFavoriteClick: (() -> Unit)? = null,
 ) {
     val src = remember { MutableInteractionSource() }
     Column(modifier.width(width).pressScale(src).clickableWith(src, onClick, onLongClick)) {
         Box {
             Artwork(art, seed, Modifier.fillMaxWidth().aspectRatio(1f), if (circle) CircleShape else RoundedCornerShape(16.dp), lookup = lookup, preferLookup = preferLookup)
             if (badge != null) Badge(badge, Modifier.align(Alignment.TopStart).padding(8.dp))
+            if (onFavoriteClick != null && isFavorite != null) {
+                val accent = LocalAccent.current.primary
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onFavoriteClick
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                        contentDescription = if (isFavorite) "Remove from favourites" else "Add to favourites",
+                        tint = if (isFavorite) accent else Color.White,
+                        modifier = Modifier.size(17.dp)
+                    )
+                }
+            }
         }
         Spacer(Modifier.height(10.dp))
         Text(title, style = MaterialTheme.typography.titleSmall, color = Palette.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)

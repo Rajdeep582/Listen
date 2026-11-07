@@ -23,10 +23,11 @@ import kotlinx.coroutines.launch
 class AppContainer(app: Application) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val db = ListenDatabase.build(app)
+    val account = com.rajdeep.listen.data.AccountClient(app)
     val settings = SettingsStore(app)
     val scanner = MediaScanner(app, db.dao())
     val radio = com.rajdeep.listen.data.RadioPrefs(app)
-    val library = LibraryRepository(db.dao(), scanner, settings, scope)
+    val library = LibraryRepository(db.dao(), scanner, settings, scope, account)
     val player = PlayerConnection(app, library, scope)
     val recommender = com.rajdeep.listen.data.Recommender(app, db.dao())
 }

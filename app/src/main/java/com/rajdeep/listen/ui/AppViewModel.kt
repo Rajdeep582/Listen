@@ -17,8 +17,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.rajdeep.listen.data.AccountUser
 
 sealed interface Remote<out T> {
     data object Loading : Remote<Nothing>
@@ -31,6 +34,61 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val c = (app as ListenApp).container
     val library = c.library
     val player = c.player
+    private val _accountUser = MutableStateFlow<AccountUser?>(c.account.user)
+    val accountUser: StateFlow<AccountUser?> = _accountUser.asStateFlow()
+    private val _accountReady = MutableStateFlow(false)
+    val accountReady: StateFlow<Boolean> = _accountReady.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            _accountUser.value = runCatching { c.account.restore() }.getOrNull()
+            if (_accountUser.value != null) {
+                runCatching { syncCloudFavorites() }
+                runCatching { syncCloudPreferences() }
+            }
+            _accountReady.value = true
+        }
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.combine(player.state, _accountUser) { state, user ->
+                val track = state.current
+                if (user != null && track != null && track.localId == null && !track.isLive) user to track else null
+            }.filterNotNull().distinctUntilChangedBy { "${it.first.id}:${it.second.mediaId}" }.collect { (_, track) ->
+                runCatching { c.account.recordPlay(track.mediaId, track.title, track.artist, track.album, track.artwork?.toString().orEmpty()) }
+            }
+        }
+    }
+
+    suspend fun authenticate(username: String, password: String, create: Boolean): Result<AccountUser> = runCatching {
+        val localFavorites = if (create) c.library.dao.allFavourites() else emptyList()
+        val session = if (create) c.account.signUp(username, password) else c.account.signIn(username, password)
+        _accountUser.value = session.user
+        if (create) localFavorites.forEach { song ->
+            runCatching { c.account.syncFavorite(session.user.id, "local:${song.id}", true, song.title, song.artist, song.album) }
+        }
+        runCatching { syncCloudFavorites() }
+        runCatching { syncCloudPreferences() }
+        session.user
+    }
+
+    fun signOut() {
+        c.account.signOut(); _accountUser.value = null
+        viewModelScope.launch { c.library.dao.replaceFavorites(emptyList()) }
+    }
+    private suspend fun syncCloudFavorites() {
+        val ownerId = _accountUser.value?.id ?: return
+        if (!c.account.flushPendingFavorites(ownerId)) return
+        val records = c.account.favorites()
+        val ids = buildList {
+            repeat(records.length()) { i ->
+                val id = records.optJSONObject(i)?.optString("songId").orEmpty()
+                if (id.startsWith("local:")) id.removePrefix("local:").toLongOrNull()?.let(::add)
+            }
+        }
+        c.library.dao.replaceFavorites(ids)
+    }
+    fun recordSearch(query: String) = viewModelScope.launch { if (c.account.token != null) runCatching { c.account.recordSearch(query) } }
+    suspend fun cloudFavorites() = runCatching { c.account.favorites() }.getOrNull()
+    suspend fun cloudHistory() = runCatching { c.account.history() }.getOrNull()
 
     private fun <T> Flow<T>.cached(initial: T): StateFlow<T> = stateIn(viewModelScope, SharingStarted.WhileSubscribed(15_000), initial)
 
@@ -159,7 +217,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (tracks.isEmpty()) onError("No playable audio in this item") else player.playOnline(tracks, 0)
     }
 
-    fun updateSettings(f: (Settings) -> Settings) = viewModelScope.launch { c.settings.update(f) }
+    private suspend fun syncCloudPreferences() {
+        val remote = c.account.preferences()
+        if (remote.length() == 0) {
+            val s = c.settings.current()
+            c.account.savePreferences(org.json.JSONObject().put("onlineEnabled", s.onlineEnabled).put("musicTheme", s.musicTheme).put("reduceMotion", s.reduceMotion))
+        } else {
+            c.settings.update { current -> current.copy(
+                onlineEnabled = if (remote.has("onlineEnabled")) remote.optBoolean("onlineEnabled") else current.onlineEnabled,
+                musicTheme = if (remote.has("musicTheme")) remote.optInt("musicTheme").coerceIn(0, com.rajdeep.listen.ui.theme.Themes.music.lastIndex) else current.musicTheme,
+                reduceMotion = if (remote.has("reduceMotion")) remote.optBoolean("reduceMotion") else current.reduceMotion,
+            ) }
+        }
+    }
+
+    fun updateSettings(f: (Settings) -> Settings) = viewModelScope.launch {
+        c.settings.update(f)
+        if (c.account.token != null) runCatching {
+            val s = c.settings.current()
+            c.account.savePreferences(org.json.JSONObject().put("onlineEnabled", s.onlineEnabled).put("musicTheme", s.musicTheme).put("reduceMotion", s.reduceMotion))
+        }
+    }
     fun rescan() = library.scan()
 
     // ---- song action sheet / playlist picker ----

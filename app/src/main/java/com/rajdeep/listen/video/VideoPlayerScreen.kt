@@ -281,7 +281,7 @@ fun VideoPlayerScreen(host: VideoPlayerActivity) {
             }
 
             // ---- controls ----
-            AnimatedVisibility(controlsVisible && !locked, enter = fadeIn(tween(160)), exit = fadeOut(tween(220))) {
+            AnimatedVisibility(controlsVisible && !locked, enter = fadeIn(tween(120)), exit = fadeOut(tween(170))) {
                 ControlsOverlay(
                     host = host, state = state, accent = accent.primary,
                     onPanel = { panel = it; poke() }, onLock = { locked = true; controlsVisible = true; poke() },
@@ -369,8 +369,8 @@ private fun IndicatorOverlay(indicator: Indicator?, modifier: Modifier) {
     }
 }
 
-private val Glass = Color.Black.copy(alpha = 0.38f)
-private val GlassLine = Color.White.copy(alpha = 0.12f)
+private val Glass = Color.Black.copy(alpha = 0.30f)
+private val GlassLine = Color.White.copy(alpha = 0.16f)
 
 private fun Modifier.glass(shape: androidx.compose.ui.graphics.Shape) =
     this.clip(shape).background(Glass).border(1.dp, GlassLine, shape)
@@ -461,19 +461,22 @@ private fun trimRate(r: Float) = "%.2f".format(r).trimEnd('0').trimEnd('.')
 private fun PlayButton(state: VideoUiState, accent: Color, onClick: () -> Unit) {
     val src = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
-    val sc by animateFloatAsState(if (pressed) 0.9f else 1f, androidx.compose.animation.core.spring(dampingRatio = 0.5f), label = "pp")
+    val sc by animateFloatAsState(if (pressed) 0.88f else 1f, androidx.compose.animation.core.spring(dampingRatio = 0.55f, stiffness = 900f), label = "pp")
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     Box(
         Modifier.size(84.dp).graphicsLayer { scaleX = sc; scaleY = sc }
-            .clip(CircleShape).background(Brush.radialGradient(listOf(accent, accent.copy(alpha = 0.82f))))
-            .border(2.dp, Color.White.copy(0.25f), CircleShape)
-            .clickable(interactionSource = src, indication = null, onClick = onClick),
+            .clip(CircleShape).background(Brush.radialGradient(listOf(Color.Black.copy(0.22f), Color.Black.copy(0.38f))))
+            .border(1.5.dp, Brush.linearGradient(listOf(Color.White.copy(0.55f), accent.copy(0.35f))), CircleShape)
+            .clickable(interactionSource = src, indication = null) {
+                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onClick()
+            },
         contentAlignment = Alignment.Center,
     ) {
         androidx.compose.animation.AnimatedContent(
             when { state.ended -> 2; state.isPlaying -> 1; else -> 0 }, label = "pi",
-            transitionSpec = { (fadeIn(tween(140)) + scaleIn(initialScale = 0.6f)) togetherWith (fadeOut(tween(100)) + scaleOut(targetScale = 0.6f)) },
+            transitionSpec = { (fadeIn(tween(110)) + scaleIn(tween(160), initialScale = 0.7f)) togetherWith (fadeOut(tween(80)) + scaleOut(tween(120), targetScale = 0.7f)) },
         ) { k ->
-            Icon(when (k) { 2 -> Icons.Rounded.Replay; 1 -> Icons.Rounded.Pause; else -> Icons.Rounded.PlayArrow }, "Play/Pause", tint = Palette.Ink, modifier = Modifier.size(44.dp))
+            Icon(when (k) { 2 -> Icons.Rounded.Replay; 1 -> Icons.Rounded.Pause; else -> Icons.Rounded.PlayArrow }, "Play/Pause", tint = Color.White, modifier = Modifier.size(46.dp))
         }
     }
 }
@@ -549,10 +552,13 @@ private fun TopAction(icon: ImageVector, label: String, badge: Int?, lit: Boolea
 private fun GlassIcon(icon: ImageVector, label: String, size: androidx.compose.ui.unit.Dp, enabled: Boolean = true, onClick: () -> Unit) {
     val src = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
-    val sc by animateFloatAsState(if (pressed) 0.88f else 1f, androidx.compose.animation.core.spring(dampingRatio = 0.5f), label = "gi")
+    val sc by animateFloatAsState(if (pressed) 0.86f else 1f, androidx.compose.animation.core.spring(dampingRatio = 0.55f, stiffness = 900f), label = "gi")
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     Box(
         Modifier.size(size).graphicsLayer { scaleX = sc; scaleY = sc; alpha = if (enabled) 1f else 0.35f }
-            .glass(CircleShape).clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick),
+            .glass(CircleShape).clickable(interactionSource = src, indication = null, enabled = enabled) {
+                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove); onClick()
+            },
         contentAlignment = Alignment.Center,
     ) { Icon(icon, label, tint = Color.White, modifier = Modifier.size(size * 0.5f)) }
 }

@@ -43,6 +43,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -125,9 +126,27 @@ fun SearchScreen(vm: AppViewModel, nav: Nav, mode: Mode) {
     val keyboard = LocalSoftwareKeyboardController.current
     val accent = LocalAccent.current.primary
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
-    fun commit(q: String = query) { history.add(modeKey, q); recents = history.get(modeKey) }
-    fun runQuery(q: String) { query = q; commit(q); keyboard?.hide(); focusManager.clearFocus() }
+    fun commit(q: String = query) { history.add(modeKey, q); recents = history.get(modeKey); if (mode == Mode.MUSIC) vm.recordSearch(q) }
+    fun runQuery(q: String) {
+        val raw = q.trim()
+        if (raw.isEmpty()) return
+        commit(raw)
+        keyboard?.hide()
+        focusManager.clearFocus()
+        if (mode == Mode.MUSIC && settings.onlineEnabled && com.rajdeep.listen.data.online.AiClient.fast) {
+            scope.launch {
+                val norm = com.rajdeep.listen.data.online.AiClient.normalize(raw, 1500)
+                query = norm
+                if (!norm.equals(raw, ignoreCase = true)) {
+                    commit(norm)
+                }
+            }
+        } else {
+            query = raw
+        }
+    }
 
     LaunchedEffect(Unit) { if (query.isEmpty()) runCatching { focus.requestFocus() } }
     // hide keyboard as soon as the user starts scrolling results
@@ -154,31 +173,34 @@ fun SearchScreen(vm: AppViewModel, nav: Nav, mode: Mode) {
         webSuggest = emptyList(); aiSuggest = emptyList()
         if (mode != Mode.MUSIC || !settings.onlineEnabled || q.length < 2) return@LaunchedEffect
         coroutineScope {
-            launch { delay(120); webSuggest = com.rajdeep.listen.data.online.QuerySuggest.complete(q).filterNot { it.equals(q, true) }.take(5) }
-            // AI DISABLED (owner request) — uncomment to re-enable AI completions in the search bar:
-            // launch {
-            //     delay(if (com.rajdeep.listen.data.online.AiClient.fast) 250 else 600)
-            //     aiSuggest = com.rajdeep.listen.data.online.AiClient.stringArray(
-            //         system = "You autocomplete a music app search box. Given partial input, return 4 likely complete searches (song, artist, album or mood) a listener means. Short, no quotes inside.",
-            //         user = q, timeoutMs = if (com.rajdeep.listen.data.online.AiClient.fast) 2000 else 6000, maxTokens = 80,
-            //     ).orEmpty().filterNot { it.equals(q, true) }.take(4)
-            // }
+            launch {
+                delay(120)
+                webSuggest = com.rajdeep.listen.data.online.QuerySuggest.complete(q).filterNot { it.equals(q, true) }
+            }
+            launch {
+                delay(if (com.rajdeep.listen.data.online.AiClient.fast) 250 else 600)
+                aiSuggest = com.rajdeep.listen.data.online.AiClient.suggest(q).filterNot { it.equals(q, true) }
+            }
         }
     }
 
     // ---- online: debounced, parallel, cached, ranked ----
     LaunchedEffect(query, settings.onlineEnabled, mode) {
         val q = query.trim()
-        val key = SearchEngine.norm(q)
-        if (mode != Mode.MUSIC || !settings.onlineEnabled || key.length < 2) { bundle = null; onlineLoading = false; return@LaunchedEffect }
-        onlineCache[key]?.let { bundle = it; onlineLoading = false; return@LaunchedEffect }
+        if (mode != Mode.MUSIC || !settings.onlineEnabled || q.length < 2) { bundle = null; onlineLoading = false; return@LaunchedEffect }
         delay(450)
         onlineLoading = true
+        // Normalize query with AI if available so misspelled queries (e.g. "arjit singh") yield clean matches
+        val targetQ = if (com.rajdeep.listen.data.online.AiClient.fast) {
+            com.rajdeep.listen.data.online.AiClient.normalize(q, 1500)
+        } else q
+        val key = SearchEngine.norm(targetQ)
+        onlineCache[key]?.let { bundle = it; onlineLoading = false; return@LaunchedEffect }
         var tracks = emptyList<OnlineTrack>(); var stations = emptyList<OnlineTrack>(); var archive = emptyList<InternetArchive.Item>()
         coroutineScope {
-            launch { tracks = SearchEngine.online(q, OnlineCatalog.search(q)); bundle = OnlineBundle(tracks, stations, archive) }
-            launch { stations = runCatching { RadioBrowser.search(q) }.getOrDefault(emptyList()).take(12) }
-            launch { archive = runCatching { InternetArchive.search(q) }.getOrDefault(emptyList()).take(12) }
+            launch { tracks = SearchEngine.online(targetQ, OnlineCatalog.search(targetQ)); bundle = OnlineBundle(tracks, stations, archive) }
+            launch { stations = runCatching { RadioBrowser.search(targetQ) }.getOrDefault(emptyList()).take(12) }
+            launch { archive = runCatching { InternetArchive.search(targetQ) }.getOrDefault(emptyList()).take(12) }
         }
         OnlineBundle(tracks, stations, archive).also { bundle = it; if (tracks.isNotEmpty() || stations.isNotEmpty() || archive.isNotEmpty()) onlineCache[key] = it }
         onlineLoading = false
@@ -209,6 +231,7 @@ fun SearchScreen(vm: AppViewModel, nav: Nav, mode: Mode) {
                 "JioSaavn" to b?.tracks.orEmpty().count { it.source == "JioSaavn" },
                 "FreeToUse" to b?.tracks.orEmpty().count { it.source == "FreeToUse" },
                 "Incompetech" to b?.tracks.orEmpty().count { it.source == "Incompetech" },
+                "Openverse" to b?.tracks.orEmpty().count { it.source == "Openverse" },
                 "Audius" to b?.tracks.orEmpty().count { it.source == "Audius" },
                 "Jamendo" to b?.tracks.orEmpty().count { it.source == "Jamendo" },
                 "ccMixter" to b?.tracks.orEmpty().count { it.source == "ccMixter" },
@@ -246,10 +269,10 @@ fun SearchScreen(vm: AppViewModel, nav: Nav, mode: Mode) {
             }
             // ---------- suggestions ----------
             if (source == "All") {
-                // local matches → AI picks → web completions; de-duplicated, max 9
+                // local matches → AI picks → web completions; de-duplicated, max 8
                 val seen = HashSet<String>()
                 val merged = (suggestions.map { it to 0 } + aiSuggest.map { it to 1 } + webSuggest.map { it to 2 })
-                    .filter { seen.add(it.first.lowercase().trim()) }.take(9)
+                    .filter { seen.add(it.first.lowercase().trim()) }.take(8)
                 items(merged, key = { "sug${it.second}${it.first}" }) { (sg, kind) ->
                     QueryRow(
                         when (kind) { 1 -> Icons.Rounded.AutoAwesome; 2 -> Icons.Rounded.Search; else -> Icons.AutoMirrored.Rounded.TrendingUp },
